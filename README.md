@@ -2,14 +2,20 @@
 
 Минимальный приватный web/PWA-чат с постоянной voice/video-комнатой в каждом чате.
 
-## Что уже есть в основе
+## Что уже работает
 
 - npm workspaces monorepo: React frontend, Fastify API, shared Zod schemas
-- PostgreSQL + Prisma models
-- Socket.IO и заготовки LiveKit/Valkey
+- регистрация, вход, выход и cookie session через Better Auth
+- поиск пользователей только по username
+- direct и group chats в одном списке
+- история и отправка текстовых сообщений
+- realtime-доставка сообщений через authenticated Socket.IO
+- membership-проверки для chat/messages/voice endpoints
+- постоянная LiveKit voice/video room внутри каждого чата
+- mic/camera controls, local deafen и независимый leave
+- voice presence в Valkey
 - Tailwind CSS и PWA manifest/service worker
 - Docker Compose для frontend, backend, PostgreSQL, Valkey, LiveKit и Caddy
-- Better Auth email/password auth with username support
 
 ## Требования
 
@@ -61,6 +67,17 @@ Auth routes are mounted under `/auth`:
 - `POST /auth/sign-out`
 - `GET /auth/me`
 
+Main API routes:
+
+- `GET /users/search?username=`
+- `GET /chats`
+- `POST /chats/direct`
+- `POST /chats/group`
+- `GET /chats/:chatId/messages`
+- `POST /chats/:chatId/messages`
+- `POST /chats/:chatId/voice/token`
+- `GET /chats/:chatId/voice/presence`
+
 ## Основные команды
 
 ```bash
@@ -72,11 +89,8 @@ npm run db:generate
 npm run db:migrate -- --name init
 ```
 
-## Следующие этапы
+## Следующий этап
 
-1. поиск пользователей и создание чатов
-2. история сообщений и realtime Socket.IO events
-3. LiveKit token endpoint и voice presence
-4. production Caddy/LiveKit TURN-конфигурация и backup PostgreSQL
+Production deploy описан в [`docs/VPS_DEPLOY.md`](docs/VPS_DEPLOY.md): VPS, DNS, HTTPS, firewall, secrets, migrations and backup.
 
 Не коммитьте `.env`: реальные секреты должны храниться только на машине разработчика и VPS.

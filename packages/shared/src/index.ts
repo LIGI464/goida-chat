@@ -26,6 +26,10 @@ export const messageInputSchema = z.object({
   text: z.string().trim().min(1).max(4000),
 });
 
+export const messageTextSchema = z.object({
+  text: z.string().trim().min(1).max(4000),
+});
+
 export const createDirectChatSchema = z.object({ username: usernameSchema });
 
 export const createGroupChatSchema = z.object({
@@ -33,6 +37,14 @@ export const createGroupChatSchema = z.object({
   memberUsernames: z.array(usernameSchema).max(99),
 });
 
+export const addChatMemberSchema = z.object({ username: usernameSchema });
+export const chatIdParamsSchema = z.object({ chatId: z.string().cuid() });
+export const paginationQuerySchema = z.object({
+  cursor: z.string().cuid().optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(50),
+});
+
 export type SignUpInput = z.infer<typeof signUpSchema>;
 export type SignInInput = z.infer<typeof signInSchema>;
 export type MessageInput = z.infer<typeof messageInputSchema>;
+export type MessageTextInput = z.infer<typeof messageTextSchema>;

@@ -13,7 +13,14 @@ Stage 0 is done:
 - first GitHub backup is published;
 - email/password auth with username is implemented;
 - protected frontend routes are wired;
-- `/auth/me` returns the current user session.
+- `/auth/me` returns the current user session;
+- username search and direct/group chats are implemented;
+- messages are stored in PostgreSQL and delivered through authenticated Socket.IO;
+- chat membership is checked for chat, message and voice operations;
+- LiveKit room tokens and Valkey voice presence are implemented;
+- voice UI supports microphone, camera, local deafen and independent leave;
+- mobile chat/list navigation and PWA build are ready;
+- Docker/Caddy end-to-end smoke tests pass.
 
 ## What the owner does next
 
@@ -30,11 +37,8 @@ Stage 0 is done:
 
 ## Development order
 
-1. Users: search by username only.
-2. Chats: direct/group creation and one shared chat list.
-3. Messages: history, text validation, realtime Socket.IO delivery.
-4. Voice/video: LiveKit room token endpoint and join/leave flow.
-5. Voice presence: temporary state in Valkey, later LiveKit webhooks.
-6. PWA polish: mobile layout, manifest icons, Android Chrome camera/mic checks.
-7. Production deployment: VPS, DNS, HTTPS, Caddy, firewall and backup script.
-8. Capacitor Android wrapper after the web/PWA MVP works.
+1. Production deployment: VPS, DNS, HTTPS, Caddy and firewall.
+2. Test camera/microphone from two real browsers over HTTPS.
+3. Add LiveKit webhooks for authoritative presence after the MVP deploy.
+4. Add automated PostgreSQL backup scheduling.
+5. Add Capacitor Android wrapper after the web/PWA MVP is stable.

@@ -3,6 +3,14 @@
     reverse_proxy backend:3000
   }
 
+  handle /users/* {
+    reverse_proxy backend:3000
+  }
+
+  handle /chats/* {
+    reverse_proxy backend:3000
+  }
+
   handle /health {
     reverse_proxy backend:3000
   }

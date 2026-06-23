@@ -83,6 +83,8 @@ services:
     image: livekit/livekit-server:v1.9
     restart: unless-stopped
     command: --config /etc/livekit.yaml
+    environment:
+      LIVEKIT_KEYS: '${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-change_me_livekit_secret_at_least_32_chars}'
     volumes:
       - ./services/livekit/livekit.yaml:/etc/livekit.yaml:ro
     depends_on:

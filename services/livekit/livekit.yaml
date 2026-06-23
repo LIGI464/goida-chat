@@ -11,8 +11,5 @@ rtc:
 redis:
   address: valkey:6379
 
-keys:
-  devkey: change_me_livekit_secret_at_least_32_chars
-
 logging:
   level: info

@@ -38,7 +38,11 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     url: '/auth/*',
     async handler(request, reply) {
       try {
-        const url = new URL(request.url, `http://${request.headers.host ?? 'localhost'}`);
+        const forwardedProto = request.headers['x-forwarded-proto'];
+        const protocol = Array.isArray(forwardedProto)
+          ? forwardedProto[0]
+          : (forwardedProto?.split(',')[0]?.trim() ?? 'http');
+        const url = new URL(request.url, `${protocol}://${request.headers.host ?? 'localhost'}`);
         const headers = fromNodeHeaders(request.headers);
         const authRequest = new Request(url, {
           method: request.method,

@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev -w @goida-chat/web\" \"npm run dev -w @goida-chat/api\"",
     "build": "npm run build -w @goida-chat/shared && npm run build -w @goida-chat/api && npm run build -w @goida-chat/web",
-    "typecheck": "npm run typecheck -w @goida-chat/shared && npm run typecheck -w @goida-chat/api && npm run typecheck -w @goida-chat/web",
+    "typecheck": "npm run build -w @goida-chat/shared && npm run typecheck -w @goida-chat/shared && npm run typecheck -w @goida-chat/api && npm run typecheck -w @goida-chat/web",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
