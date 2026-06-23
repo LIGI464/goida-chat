@@ -1,0 +1,75 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id          String       @id @default(cuid())
+  email       String       @unique
+  username    String       @unique
+  displayName String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships ChatMember[]
+  messages    Message[]
+}
+
+model Chat {
+  id          String       @id @default(cuid())
+  type        ChatType
+  title       String?
+  createdById String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  members     ChatMember[]
+  messages    Message[]
+  voiceRoom   VoiceRoom?
+
+  @@index([updatedAt])
+}
+
+enum ChatType {
+  direct
+  group
+}
+
+model ChatMember {
+  id                String   @id @default(cuid())
+  chatId            String
+  userId            String
+  joinedAt          DateTime @default(now())
+  lastReadMessageId String?
+  chat              Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([chatId, userId])
+  @@index([userId])
+  @@index([chatId])
+}
+
+model Message {
+  id        String    @id @default(cuid())
+  chatId    String
+  userId    String
+  text      String
+  createdAt DateTime  @default(now())
+  editedAt  DateTime?
+  chat      Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([userId])
+}
+
+model VoiceRoom {
+  id              String   @id @default(cuid())
+  chatId          String   @unique
+  livekitRoomName String   @unique
+  createdAt       DateTime @default(now())
+  chat            Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+}
+

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.env
+.env.*.local
+!.env.example
+coverage/
+*.log
+.DS_Store
+.idea/
+.vscode/
+services/api/prisma/dev.db

@@ -1,0 +1,12 @@
+{$APP_SITE:http://localhost} {
+  reverse_proxy frontend:80
+}
+
+{$API_SITE:http://api.localhost} {
+  reverse_proxy backend:3000
+}
+
+{$LIVEKIT_SITE:http://livekit.localhost} {
+  reverse_proxy livekit:7880
+}
+
