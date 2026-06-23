@@ -1,33 +1,52 @@
+(security_headers) {
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+}
+
 {$APP_SITE:http://localhost} {
-  handle /auth/* {
-    reverse_proxy backend:3000
-  }
+	import security_headers
+	encode zstd gzip
 
-  handle /users/* {
-    reverse_proxy backend:3000
-  }
+	handle /auth/* {
+		reverse_proxy backend:3000
+	}
 
-  handle /chats/* {
-    reverse_proxy backend:3000
-  }
+	handle /users/* {
+		reverse_proxy backend:3000
+	}
 
-  handle /health {
-    reverse_proxy backend:3000
-  }
+	handle /chats/* {
+		reverse_proxy backend:3000
+	}
 
-  handle /socket.io/* {
-    reverse_proxy backend:3000
-  }
+	handle /health {
+		reverse_proxy backend:3000
+	}
 
-  handle {
-    reverse_proxy frontend:80
-  }
+	handle /socket.io/* {
+		reverse_proxy backend:3000
+	}
+
+	handle {
+		reverse_proxy frontend:80
+	}
 }
 
 {$API_SITE:http://api.localhost} {
-  reverse_proxy backend:3000
+	import security_headers
+	encode zstd gzip
+
+	reverse_proxy backend:3000
 }
 
 {$LIVEKIT_SITE:http://livekit.localhost} {
-  reverse_proxy livekit:7880
+	import security_headers
+
+	reverse_proxy livekit:7880
 }

@@ -104,12 +104,21 @@ docker compose exec backend npx prisma migrate deploy --schema services/api/pris
 docker compose ps
 ```
 
+The API refuses to start in production if placeholder secrets or non-HTTPS production URLs are left in `.env`.
+This is intentional: fix `.env` instead of weakening the check.
+
 ## 5. Smoke tests
 
 Open:
 
 - `https://app.example.com`
 - `https://api.example.com/health`
+
+Or run the bundled VPS smoke check from the repo root:
+
+```bash
+bash scripts/vps-smoke-test.sh
+```
 
 Test checklist:
 
@@ -126,8 +135,7 @@ Test checklist:
 Manual backup:
 
 ```bash
-mkdir -p backups
-docker compose exec -T postgres pg_dump -U goida -d goida_chat | gzip > "backups/goida-chat-$(date +%F-%H%M).sql.gz"
+bash scripts/vps-backup-postgres.sh
 ```
 
 Restore example:

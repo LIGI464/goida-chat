@@ -34,81 +34,92 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     return { chats: chats.map((chat) => serializeChat(chat, session.user.id)) };
   });
 
-  app.post('/chats/direct', async (request) => {
-    const session = await requireSession(request);
-    const body = createDirectChatSchema.parse(request.body);
-    const target = await prisma.user.findUnique({ where: { username: body.username } });
+  app.post(
+    '/chats/direct',
+    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (request) => {
+      const session = await requireSession(request);
+      const body = createDirectChatSchema.parse(request.body);
+      const target = await prisma.user.findUnique({ where: { username: body.username } });
 
-    if (!target || target.id === session.user.id) {
-      throw notFound('User not found');
-    }
+      if (!target || target.id === session.user.id) {
+        throw notFound('User not found');
+      }
 
-    const existing = await prisma.chat.findFirst({
-      where: {
-        type: 'direct',
-        AND: [
-          { members: { some: { userId: session.user.id } } },
-          { members: { some: { userId: target.id } } },
-        ],
-      },
-      include: chatInclude,
-    });
-
-    if (existing) {
-      await ensureVoiceRoom(existing.id);
-      return { chat: serializeChat(existing, session.user.id) };
-    }
-
-    const chat = await prisma.$transaction(async (tx) => {
-      const created = await tx.chat.create({
-        data: {
+      const existing = await prisma.chat.findFirst({
+        where: {
           type: 'direct',
-          createdById: session.user.id,
-          members: {
-            create: [{ userId: session.user.id }, { userId: target.id }],
-          },
+          AND: [
+            { members: { some: { userId: session.user.id } } },
+            { members: { some: { userId: target.id } } },
+          ],
         },
+        include: chatInclude,
       });
-      await tx.voiceRoom.create({
-        data: { chatId: created.id, livekitRoomName: `chat_${created.id}_voice` },
-      });
-      return tx.chat.findUniqueOrThrow({ where: { id: created.id }, include: chatInclude });
-    });
 
-    return { chat: serializeChat(chat, session.user.id) };
-  });
+      if (existing) {
+        await ensureVoiceRoom(existing.id);
+        return { chat: serializeChat(existing, session.user.id) };
+      }
 
-  app.post('/chats/group', async (request) => {
-    const session = await requireSession(request);
-    const body = createGroupChatSchema.parse(request.body);
-    const uniqueUsernames = [...new Set(body.memberUsernames)].filter(
-      (username) => username !== (session.user as { username?: string }).username,
-    );
-    const members = await prisma.user.findMany({ where: { username: { in: uniqueUsernames } } });
-
-    if (members.length !== uniqueUsernames.length) {
-      throw badRequest('Some users were not found');
-    }
-
-    const chat = await prisma.$transaction(async (tx) => {
-      const created = await tx.chat.create({
-        data: {
-          type: 'group',
-          title: body.title,
-          createdById: session.user.id,
-          members: {
-            create: [{ userId: session.user.id }, ...members.map((user) => ({ userId: user.id }))],
+      const chat = await prisma.$transaction(async (tx) => {
+        const created = await tx.chat.create({
+          data: {
+            type: 'direct',
+            createdById: session.user.id,
+            members: {
+              create: [{ userId: session.user.id }, { userId: target.id }],
+            },
           },
-        },
+        });
+        await tx.voiceRoom.create({
+          data: { chatId: created.id, livekitRoomName: `chat_${created.id}_voice` },
+        });
+        return tx.chat.findUniqueOrThrow({ where: { id: created.id }, include: chatInclude });
       });
-      await tx.voiceRoom.create({
-        data: { chatId: created.id, livekitRoomName: `chat_${created.id}_voice` },
-      });
-      return tx.chat.findUniqueOrThrow({ where: { id: created.id }, include: chatInclude });
-    });
 
-    return { chat: serializeChat(chat, session.user.id) };
-  });
+      return { chat: serializeChat(chat, session.user.id) };
+    },
+  );
+
+  app.post(
+    '/chats/group',
+    { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (request) => {
+      const session = await requireSession(request);
+      const body = createGroupChatSchema.parse(request.body);
+      const uniqueUsernames = [...new Set(body.memberUsernames)].filter(
+        (username) => username !== (session.user as { username?: string }).username,
+      );
+      const members = await prisma.user.findMany({ where: { username: { in: uniqueUsernames } } });
+
+      if (members.length !== uniqueUsernames.length) {
+        throw badRequest('Some users were not found');
+      }
+
+      const chat = await prisma.$transaction(async (tx) => {
+        const created = await tx.chat.create({
+          data: {
+            type: 'group',
+            title: body.title,
+            createdById: session.user.id,
+            members: {
+              create: [
+                { userId: session.user.id },
+                ...members.map((user) => ({ userId: user.id })),
+              ],
+            },
+          },
+        });
+        await tx.voiceRoom.create({
+          data: { chatId: created.id, livekitRoomName: `chat_${created.id}_voice` },
+        });
+        return tx.chat.findUniqueOrThrow({ where: { id: created.id }, include: chatInclude });
+      });
+
+      return { chat: serializeChat(chat, session.user.id) };
+    },
+  );
 
   app.get('/chats/:chatId', async (request) => {
     const session = await requireSession(request);
@@ -124,32 +135,36 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     return { chat: serializeChat(chat, session.user.id) };
   });
 
-  app.post('/chats/:chatId/members', async (request) => {
-    const session = await requireSession(request);
-    const params = chatIdParamsSchema.parse(request.params);
-    const body = addChatMemberSchema.parse(request.body);
-    await ensureChatMember(session.user.id, params.chatId);
+  app.post(
+    '/chats/:chatId/members',
+    { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } },
+    async (request) => {
+      const session = await requireSession(request);
+      const params = chatIdParamsSchema.parse(request.params);
+      const body = addChatMemberSchema.parse(request.body);
+      await ensureChatMember(session.user.id, params.chatId);
 
-    const chat = await prisma.chat.findUnique({ where: { id: params.chatId } });
-    if (!chat || chat.type !== 'group') throw notFound('Chat not found');
+      const chat = await prisma.chat.findUnique({ where: { id: params.chatId } });
+      if (!chat || chat.type !== 'group') throw notFound('Chat not found');
 
-    const user = await prisma.user.findUnique({ where: { username: body.username } });
-    if (!user) throw notFound('User not found');
+      const user = await prisma.user.findUnique({ where: { username: body.username } });
+      if (!user) throw notFound('User not found');
 
-    await prisma.chatMember.upsert({
-      where: { chatId_userId: { chatId: params.chatId, userId: user.id } },
-      update: {},
-      create: { chatId: params.chatId, userId: user.id },
-    });
+      await prisma.chatMember.upsert({
+        where: { chatId_userId: { chatId: params.chatId, userId: user.id } },
+        update: {},
+        create: { chatId: params.chatId, userId: user.id },
+      });
 
-    const updated = await prisma.chat.findUniqueOrThrow({
-      where: { id: params.chatId },
-      include: chatInclude,
-    });
-    io.to(`chat:${params.chatId}`).emit('chat:updated', serializeChat(updated, session.user.id));
+      const updated = await prisma.chat.findUniqueOrThrow({
+        where: { id: params.chatId },
+        include: chatInclude,
+      });
+      io.to(`chat:${params.chatId}`).emit('chat:updated', serializeChat(updated, session.user.id));
 
-    return { chat: serializeChat(updated, session.user.id) };
-  });
+      return { chat: serializeChat(updated, session.user.id) };
+    },
+  );
 
   app.get('/chats/:chatId/messages', async (request) => {
     const session = await requireSession(request);
@@ -174,14 +189,18 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     };
   });
 
-  app.post('/chats/:chatId/messages', async (request) => {
-    const session = await requireSession(request);
-    const params = chatIdParamsSchema.parse(request.params);
-    const body = messageTextSchema.parse(request.body);
-    const message = await createTextMessage(params.chatId, session.user.id, body.text);
+  app.post(
+    '/chats/:chatId/messages',
+    { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
+    async (request) => {
+      const session = await requireSession(request);
+      const params = chatIdParamsSchema.parse(request.params);
+      const body = messageTextSchema.parse(request.body);
+      const message = await createTextMessage(params.chatId, session.user.id, body.text);
 
-    io.to(`chat:${params.chatId}`).emit('message:new', message);
+      io.to(`chat:${params.chatId}`).emit('message:new', message);
 
-    return { message };
-  });
+      return { message };
+    },
+  );
 }

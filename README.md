@@ -89,6 +89,13 @@ npm run db:generate
 npm run db:migrate -- --name init
 ```
 
+## VPS helper scripts
+
+```bash
+bash scripts/vps-smoke-test.sh
+bash scripts/vps-backup-postgres.sh
+```
+
 ## Следующий этап
 
 Production deploy описан в [`docs/VPS_DEPLOY.md`](docs/VPS_DEPLOY.md): VPS, DNS, HTTPS, firewall, secrets, migrations and backup.

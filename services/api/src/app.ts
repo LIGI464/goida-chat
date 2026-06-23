@@ -1,5 +1,6 @@
 import cookie from '@fastify/cookie';
 import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import Fastify from 'fastify';
 import { Server as SocketServer } from 'socket.io';
@@ -15,12 +16,22 @@ import { registerChatRoutes } from './routes/chats.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerVoiceRoutes } from './routes/voice.js';
 
+const appOrigin = new URL(env.APP_URL).origin;
+
 export async function buildApp() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    trustProxy: env.NODE_ENV === 'production',
+    bodyLimit: 64 * 1024,
+  });
 
   await app.register(cors, {
-    origin: env.APP_URL,
+    origin: appOrigin,
     credentials: true,
+  });
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
   });
   await app.register(cookie, { secret: env.COOKIE_SECRET });
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
@@ -52,7 +63,15 @@ export async function buildApp() {
   });
 
   const io = new SocketServer(app.server, {
-    cors: { origin: env.APP_URL, credentials: true },
+    cors: { origin: appOrigin, credentials: true },
+    allowRequest: (request, callback) => {
+      const origin = request.headers.origin;
+      if (!origin || origin === appOrigin) {
+        callback(null, true);
+        return;
+      }
+      callback('Forbidden origin', false);
+    },
   });
 
   app.get('/health', async () => ({ status: 'ok', service: 'api' }));

@@ -18,8 +18,24 @@ type AuthSocket = Socket & {
     userId: string;
     username?: string | null;
     voiceChats: Set<string>;
+    rateLimits: Map<string, { count: number; resetAt: number }>;
   };
 };
+
+function assertSocketRateLimit(socket: AuthSocket, key: string, max: number, windowMs: number) {
+  const now = Date.now();
+  const existing = socket.data.rateLimits.get(key);
+
+  if (!existing || existing.resetAt <= now) {
+    socket.data.rateLimits.set(key, { count: 1, resetAt: now + windowMs });
+    return;
+  }
+
+  existing.count += 1;
+  if (existing.count > max) {
+    throw new Error('Too many requests. Slow down a bit.');
+  }
+}
 
 async function emitVoicePresence(io: SocketServer, chatId: string) {
   const users = await getVoicePresence(chatId);
@@ -38,6 +54,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
       socket.data.userId = session.user.id;
       socket.data.username = (session.user as { username?: string | null }).username;
       socket.data.voiceChats = new Set<string>();
+      socket.data.rateLimits = new Map<string, { count: number; resetAt: number }>();
       return next();
     } catch (error) {
       log.warn({ error }, 'socket auth failed');
@@ -51,6 +68,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
 
     socket.on('chat:join', async (payload: { chatId?: string }, ack?: Ack) => {
       try {
+        assertSocketRateLimit(authed, 'chat:join', 120, 60_000);
         const chatId = payload.chatId ?? '';
         await ensureChatMember(authed.data.userId, chatId);
         await socket.join(`chat:${chatId}`);
@@ -68,6 +86,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
 
     socket.on('message:send', async (payload: unknown, ack?: Ack) => {
       try {
+        assertSocketRateLimit(authed, 'message:send', 30, 60_000);
         const input = messageInputSchema.parse(payload);
         const message = await createTextMessage(input.chatId, authed.data.userId, input.text);
         io.to(`chat:${input.chatId}`).emit('message:new', message);
@@ -81,6 +100,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
 
     socket.on('voice:join', async (payload: { chatId?: string }, ack?: Ack) => {
       try {
+        assertSocketRateLimit(authed, 'voice:join', 20, 60_000);
         const chatId = payload.chatId ?? '';
         await ensureChatMember(authed.data.userId, chatId);
         await addVoicePresence(chatId, authed.data.userId);
@@ -94,6 +114,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
 
     socket.on('voice:left', async (payload: { chatId?: string }, ack?: Ack) => {
       try {
+        assertSocketRateLimit(authed, 'voice:left', 20, 60_000);
         const chatId = payload.chatId ?? '';
         await removeVoicePresence(chatId, authed.data.userId);
         authed.data.voiceChats.delete(chatId);

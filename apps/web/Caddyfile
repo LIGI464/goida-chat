@@ -1,7 +1,13 @@
 :80 {
-  root * /srv
-  encode zstd gzip
-  try_files {path} /index.html
-  file_server
+	root * /srv
+	encode zstd gzip
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()"
+	}
+	try_files {path} /index.html
+	file_server
 }
-
