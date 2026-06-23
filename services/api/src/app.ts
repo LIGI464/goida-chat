@@ -6,6 +6,7 @@ import { Server as SocketServer } from 'socket.io';
 
 import { env } from './config.js';
 import { prisma } from './lib/prisma.js';
+import { registerAuthRoutes } from './routes/auth.js';
 
 export async function buildApp() {
   const app = Fastify({ logger: true });
@@ -18,6 +19,7 @@ export async function buildApp() {
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
 
   app.get('/health', async () => ({ status: 'ok', service: 'api' }));
+  await registerAuthRoutes(app);
 
   const io = new SocketServer(app.server, {
     cors: { origin: env.APP_URL, credentials: true },

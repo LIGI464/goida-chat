@@ -8,7 +8,9 @@ async function main() {
     update: {},
     create: {
       email: 'demo@example.com',
+      name: 'Demo User',
       username: 'demo_user',
+      displayUsername: 'demo_user',
       displayName: 'Demo User',
     },
   });

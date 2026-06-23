@@ -9,6 +9,7 @@
 - Socket.IO и заготовки LiveKit/Valkey
 - Tailwind CSS и PWA manifest/service worker
 - Docker Compose для frontend, backend, PostgreSQL, Valkey, LiveKit и Caddy
+- Better Auth email/password auth with username support
 
 ## Требования
 
@@ -49,8 +50,16 @@ docker compose exec backend npx prisma migrate deploy --schema services/api/pris
 ```
 
 Приложение: `http://localhost`  
-API: `http://api.localhost/health`  
+API: `http://localhost/health`  
+Альтернативный API host: `http://api.localhost/health`  
 LiveKit WebSocket: `ws://livekit.localhost`
+
+Auth routes are mounted under `/auth`:
+
+- `POST /auth/sign-up/email`
+- `POST /auth/sign-in/email`
+- `POST /auth/sign-out`
+- `GET /auth/me`
 
 ## Основные команды
 
@@ -65,10 +74,9 @@ npm run db:migrate -- --name init
 
 ## Следующие этапы
 
-1. Better Auth и таблицы auth-системы
-2. поиск пользователей и создание чатов
-3. история сообщений и realtime Socket.IO events
-4. LiveKit token endpoint и voice presence
-5. production Caddy/LiveKit TURN-конфигурация и backup PostgreSQL
+1. поиск пользователей и создание чатов
+2. история сообщений и realtime Socket.IO events
+3. LiveKit token endpoint и voice presence
+4. production Caddy/LiveKit TURN-конфигурация и backup PostgreSQL
 
 Не коммитьте `.env`: реальные секреты должны храниться только на машине разработчика и VPS.

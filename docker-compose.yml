@@ -6,7 +6,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
-        VITE_API_URL: ${API_URL:-http://api.localhost}
+        VITE_API_URL: ${API_URL:-http://localhost}
         VITE_LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit.localhost}
     restart: unless-stopped
     depends_on:
@@ -27,7 +27,7 @@ services:
       VALKEY_URL: ${VALKEY_URL:-redis://valkey:6379}
       COOKIE_SECRET: ${COOKIE_SECRET:-change_me_cookie_secret_at_least_32_chars}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:-change_me_auth_secret_at_least_32_chars}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://api.localhost}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost}
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit.localhost}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-change_me_livekit_secret_at_least_32_chars}
@@ -58,7 +58,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "127.0.0.1:55432:5432"
+      - '127.0.0.1:55432:5432'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}']
       interval: 5s
@@ -72,7 +72,7 @@ services:
     volumes:
       - valkey_data:/data
     ports:
-      - "127.0.0.1:56379:6379"
+      - '127.0.0.1:56379:6379'
     healthcheck:
       test: ['CMD', 'valkey-cli', 'ping']
       interval: 5s
