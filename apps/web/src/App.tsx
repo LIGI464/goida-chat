@@ -40,7 +40,7 @@ const registrationSchema = signUpSchema
   .extend({ repeatPassword: z.string() })
   .refine((value) => value.password === value.repeatPassword, {
     path: ['repeatPassword'],
-    message: 'Passwords do not match',
+    message: 'Пароли не совпадают',
   });
 
 type MessagesPage = { messages: Message[]; nextCursor: string | null };
@@ -51,7 +51,7 @@ function errorMessage(error: unknown) {
     return String(error.message);
   }
 
-  return 'Something went wrong. Please try again.';
+  return 'Что-то пошло не так. Попробуй ещё раз.';
 }
 
 function randomRoomTitle() {
@@ -67,7 +67,7 @@ function formatChatTime(value?: string | null) {
 }
 
 function LoadingScreen() {
-  return <main className="grid min-h-screen place-items-center text-gray-500">Loading...</main>;
+  return <main className="grid min-h-screen place-items-center text-[var(--muted)]">Загрузка...</main>;
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
@@ -126,7 +126,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
       navigate(from, { replace: true });
     } catch (caught) {
       if (caught instanceof z.ZodError) {
-        setError(caught.issues[0]?.message ?? 'Check the entered data');
+        setError(caught.issues[0]?.message ?? 'Проверь введённые данные');
       } else {
         setError(errorMessage(caught));
       }
@@ -139,7 +139,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
     <main className="grid min-h-screen place-items-center p-4">
       <section className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-xl">
         <h1 className="mb-1 text-2xl font-semibold">{register ? 'Регистрация' : 'Вход'}</h1>
-        <p className="mb-5 text-sm text-gray-500">
+        <p className="mb-5 text-sm text-[var(--muted)]">
           {register ? 'Создай приватный аккаунт' : 'С возвращением'}
         </p>
         <form className="grid gap-3" onSubmit={submit}>
@@ -405,6 +405,7 @@ function ChatSidebar({
 
     socket.on('chat:list:invalidate', invalidate);
     socket.on('presence:update', presenceUpdate);
+
     return () => {
       socket.off('chat:list:invalidate', invalidate);
       socket.off('presence:update', presenceUpdate);
@@ -521,7 +522,7 @@ function ChatSidebar({
               onClick={() => onSelect(chat.id)}
             >
               <div className="mb-1 flex items-center justify-between gap-2">
-                <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Chat'}</p>
+                <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
                 <div className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
                   {onlineCount > 0 && <span>{onlineCount} online</span>}
                   {lastTime && <span>{lastTime}</span>}
@@ -529,7 +530,7 @@ function ChatSidebar({
                 </div>
               </div>
               <p className="truncate text-xs text-[var(--muted)]">
-                {chat.lastMessage?.text ?? (members || 'Empty')}
+                {chat.lastMessage?.text ?? (members || 'Пусто')}
               </p>
             </button>
           );
@@ -609,6 +610,7 @@ function GroupMemberManager({
           </button>
         </div>
       </div>
+
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className="text-sm text-[var(--text)]">Добавить людей</p>
         <p className="text-xs text-[var(--muted)]">Поиск и приглашение сразу</p>
@@ -703,6 +705,7 @@ function ChatView({
     };
 
     socket.on('typing:update', handleTyping);
+
     return () => {
       socket.off('typing:update', handleTyping);
     };
@@ -743,7 +746,6 @@ function ChatView({
     .map((member) => member.user)
     .filter((user) => typingUserIds.includes(user.id) && user.id !== currentUserId)
     .map((user) => `@${user.username ?? user.name}`);
-  const voiceCount = chat.onlineMemberIds?.length ?? 0;
 
   return (
     <section className="grid min-h-screen grid-rows-[72px_auto_auto_1fr_auto] bg-[var(--bg)]">
@@ -758,11 +760,10 @@ function ChatView({
           </button>
           <div>
             <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
-            <p className="text-xs text-[var(--muted)]">
-              {chat.members.length} участник(ов) • {voiceCount} в звонке
-            </p>
+            <p className="text-xs text-[var(--muted)]">{chat.members.length} участник(ов)</p>
           </div>
         </div>
+
         <div className="flex items-center gap-2">
           <span className="hidden text-xs text-[var(--muted)] sm:inline">
             {socket?.connected ? 'realtime on' : 'realtime off'}
@@ -941,7 +942,7 @@ function ChatLayout() {
       });
     });
 
-    nextSocket.on('chat:updated', (chat) => {
+    nextSocket.on('chat:updated', () => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
     });
 
@@ -1005,6 +1006,7 @@ function ChatLayout() {
             selectedChatId={selectedChatId}
           />
         </div>
+
         <div className="min-w-0">
           {selectedChat ? (
             <ChatView
