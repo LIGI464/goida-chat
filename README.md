@@ -92,12 +92,13 @@ npm run db:migrate -- --name init
 ## VPS helper scripts
 
 ```bash
+bash scripts/vps-deploy.sh
 bash scripts/vps-smoke-test.sh
 bash scripts/vps-backup-postgres.sh
 ```
 
 ## Следующий этап
 
-Production deploy описан в [`docs/VPS_DEPLOY.md`](docs/VPS_DEPLOY.md): VPS, DNS, HTTPS, firewall, secrets, migrations and backup.
+Production deploy описан в [`docs/VPS_DEPLOY.md`](docs/VPS_DEPLOY.md): VPS, DNS, HTTPS, firewall, secrets, migrations and backup. Для VPS используйте `.env.production.example` как стартовый шаблон вместо локального `.env.example`.
 
 Не коммитьте `.env`: реальные секреты должны храниться только на машине разработчика и VPS.

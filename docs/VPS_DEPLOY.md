@@ -62,7 +62,7 @@ For larger calls, increase the LiveKit UDP range in both `services/livekit/livek
 ```bash
 git clone https://github.com/LIGI464/goida-chat.git
 cd goida-chat
-cp .env.example .env
+cp .env.production.example .env
 ```
 
 Edit `.env`:
@@ -106,6 +106,12 @@ docker compose ps
 
 The API refuses to start in production if placeholder secrets or non-HTTPS production URLs are left in `.env`.
 This is intentional: fix `.env` instead of weakening the check.
+
+Or run the bundled deploy script after editing `.env`:
+
+```bash
+bash scripts/vps-deploy.sh
+```
 
 ## 5. Smoke tests
 
