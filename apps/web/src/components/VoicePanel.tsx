@@ -12,16 +12,27 @@ import {
 } from '@livekit/components-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ConnectionState, Track } from 'livekit-client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  buildAudioCaptureOptions,
+  NOISE_SUPPRESSION_LEVELS,
+  readVoiceCapturePreferences,
+  type NoiseSuppressionLevel,
+  type VoiceCapturePreferences,
+  writeVoiceCapturePreferences,
+} from '../features/voice/audio/audioConstraints';
+import { useAudioDevices } from '../features/voice/audio/useAudioDevices';
+import { useAudioLevelMeter } from '../features/voice/audio/useAudioLevelMeter';
+import { useNoiseSuppression } from '../features/voice/audio/useNoiseSuppression';
 import { api, type Chat, type PublicUser, type VoiceToken } from '../lib/api';
 import type { ChatSocket } from '../lib/socket';
 
 function compactName(user: PublicUser | { identity?: string; name?: string | null }) {
   const name =
     'username' in user
-      ? user.username ?? user.name
-      : user.name ?? ('identity' in user ? user.identity : '') ?? '';
+      ? (user.username ?? user.name)
+      : (user.name ?? ('identity' in user ? user.identity : '') ?? '');
 
   return String(name ?? '').replace(/^@/, '');
 }
@@ -73,7 +84,17 @@ function VoiceActionButton({
   );
 }
 
-function VoiceToggleCluster({ deafened, onToggleDeafen }: { deafened: boolean; onToggleDeafen: () => void }) {
+function VoiceToggleCluster({
+  deafened,
+  meterLevel,
+  speaking,
+  onToggleDeafen,
+}: {
+  deafened: boolean;
+  meterLevel: number;
+  speaking: boolean;
+  onToggleDeafen: () => void;
+}) {
   const { isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant();
 
   return (
@@ -88,6 +109,18 @@ function VoiceToggleCluster({ deafened, onToggleDeafen }: { deafened: boolean; o
       >
         {isMicrophoneEnabled ? 'Микрофон: вкл' : 'Микрофон: выкл'}
       </TrackToggle>
+
+      <div className="flex h-10 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3">
+        <span className={`text-xs ${speaking ? 'text-emerald-300' : 'text-[var(--muted)]'}`}>
+          {speaking ? 'Говорит' : 'Молчит'}
+        </span>
+        <div className="h-2 w-20 overflow-hidden rounded-full bg-black/20">
+          <div
+            className={`h-full rounded-full transition-all ${speaking ? 'bg-emerald-400' : 'bg-[var(--accent)]'}`}
+            style={{ width: `${Math.max(8, Math.min(100, meterLevel * 100))}%` }}
+          />
+        </div>
+      </div>
 
       <TrackToggle
         className={`h-10 rounded-xl border px-4 text-sm font-medium transition-colors duration-150 ${
@@ -143,7 +176,9 @@ function ParticipantVolumeControls() {
           return (
             <label className="grid gap-1" key={participant.sid}>
               <div className="flex items-center justify-between gap-3">
-                <span className="truncate text-sm text-[var(--text)]">{compactName(participant)}</span>
+                <span className="truncate text-sm text-[var(--text)]">
+                  {compactName(participant)}
+                </span>
                 <span className="text-xs text-[var(--muted)]">{value}%</span>
               </div>
               <input
@@ -178,30 +213,281 @@ function VideoGrid() {
   );
 }
 
+function VoiceAudioBridge({
+  activeDeviceId,
+  capturePreferences,
+  noiseSuppressionLevel,
+  onError,
+}: {
+  activeDeviceId: string;
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
+  noiseSuppressionLevel: NoiseSuppressionLevel;
+  onError?: (message: string) => void;
+}) {
+  const { localParticipant, microphoneTrack } = useLocalParticipant();
+  const appliedSignature = useRef('');
+  const userMuted = !localParticipant.isMicrophoneEnabled;
+
+  const signature = useMemo(
+    () =>
+      JSON.stringify({
+        activeDeviceId,
+        capturePreferences,
+      }),
+    [activeDeviceId, capturePreferences],
+  );
+
+  useEffect(() => {
+    if (userMuted) {
+      appliedSignature.current = '';
+    }
+  }, [userMuted]);
+
+  useEffect(() => {
+    const publication = microphoneTrack?.audioTrack;
+    if (!publication || !localParticipant.isMicrophoneEnabled) return;
+
+    if (!appliedSignature.current) {
+      appliedSignature.current = signature;
+      return;
+    }
+
+    if (appliedSignature.current === signature) return;
+
+    let cancelled = false;
+    appliedSignature.current = signature;
+
+    const republish = async () => {
+      try {
+        await localParticipant.setMicrophoneEnabled(false);
+        if (cancelled) return;
+        await localParticipant.setMicrophoneEnabled(
+          true,
+          buildAudioCaptureOptions({
+            micDeviceId: activeDeviceId,
+            noiseSuppressionLevel,
+            ...capturePreferences,
+          }),
+        );
+      } catch (caught) {
+        appliedSignature.current = '';
+        onError?.(
+          caught instanceof Error ? caught.message : 'Не удалось применить настройки микрофона',
+        );
+      }
+    };
+
+    void republish();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeDeviceId,
+    capturePreferences,
+    localParticipant,
+    microphoneTrack,
+    noiseSuppressionLevel,
+    onError,
+    signature,
+  ]);
+
+  return null;
+}
+
+function VoiceSettingsPanel({
+  activeDeviceId,
+  devices,
+  capturePreferences,
+  setCapturePreferences,
+  setMicDeviceId,
+  noiseSuppressionLevel,
+  setNoiseSuppressionLevel,
+  microphoneTrack,
+}: {
+  activeDeviceId: string;
+  devices: MediaDeviceInfo[];
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
+  setCapturePreferences: (
+    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>,
+  ) => void;
+  setMicDeviceId: (next: string) => void;
+  noiseSuppressionLevel: NoiseSuppressionLevel;
+  setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
+  microphoneTrack: ReturnType<typeof useLocalParticipant>['microphoneTrack'];
+}) {
+  const meterTrack = microphoneTrack?.audioTrack?.mediaStreamTrack;
+  const meter = useAudioLevelMeter(meterTrack, noiseSuppressionLevel);
+  const activeLevel = NOISE_SUPPRESSION_LEVELS.find(
+    (level) => level.value === noiseSuppressionLevel,
+  );
+
+  return (
+    <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-sm text-[var(--text)]">Настройки звука</p>
+        <span className={`text-xs ${meter.speaking ? 'text-emerald-300' : 'text-[var(--muted)]'}`}>
+          {meter.speaking ? 'говорит' : 'молчит'}
+        </span>
+      </div>
+
+      <div className="grid gap-3">
+        <label className="grid gap-1">
+          <span className="text-xs text-[var(--muted)]">Микрофон</span>
+          <select
+            className="h-10 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm text-[var(--text)]"
+            onChange={(event) => setMicDeviceId(event.target.value)}
+            value={activeDeviceId}
+          >
+            {devices.length === 0 ? <option value={activeDeviceId}>Default</option> : null}
+            {devices.map((device) => (
+              <option key={device.deviceId} value={device.deviceId}>
+                {device.label || `Microphone ${device.deviceId.slice(0, 6)}`}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="grid gap-1">
+          <span className="text-xs text-[var(--muted)]">Шумодав</span>
+          <select
+            className="h-10 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm text-[var(--text)]"
+            onChange={(event) =>
+              setNoiseSuppressionLevel(event.target.value as NoiseSuppressionLevel)
+            }
+            value={noiseSuppressionLevel}
+          >
+            {NOISE_SUPPRESSION_LEVELS.map((level) => (
+              <option key={level.value} value={level.value}>
+                {level.label}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-[var(--muted)]">{activeLevel?.hint ?? 'Browser DSP only'}</p>
+        </label>
+
+        <div className="grid gap-2">
+          <label className="flex items-center justify-between gap-3 text-sm text-[var(--text)]">
+            <span>Echo cancellation</span>
+            <input
+              checked={capturePreferences.echoCancellation}
+              onChange={(event) =>
+                setCapturePreferences({
+                  ...capturePreferences,
+                  echoCancellation: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+          </label>
+
+          <label className="flex items-center justify-between gap-3 text-sm text-[var(--text)]">
+            <span>Auto gain control</span>
+            <input
+              checked={capturePreferences.autoGainControl}
+              onChange={(event) =>
+                setCapturePreferences({
+                  ...capturePreferences,
+                  autoGainControl: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+          </label>
+
+          <label className="flex items-center justify-between gap-3 text-sm text-[var(--text)]">
+            <span>Browser noise suppression</span>
+            <input
+              checked={capturePreferences.noiseSuppression}
+              onChange={(event) =>
+                setCapturePreferences({
+                  ...capturePreferences,
+                  noiseSuppression: event.target.checked,
+                })
+              }
+              type="checkbox"
+            />
+          </label>
+        </div>
+
+        <div className="grid gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs text-[var(--muted)]">Уровень микрофона</span>
+            <span className="text-xs text-[var(--muted)]">{Math.round(meter.level * 100)}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-black/20">
+            <div
+              className={`h-full rounded-full transition-all ${
+                meter.speaking ? 'bg-emerald-400' : 'bg-[var(--accent)]'
+              }`}
+              style={{ width: `${Math.max(4, Math.min(100, meter.level * 100))}%` }}
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function VoiceRoomSurface({
   chat,
   users,
   expanded,
   deafened,
-  onExpand,
   onCollapse,
+  onExpand,
   onToggleDeafen,
+  onError,
 }: {
   chat: Chat;
   users: PublicUser[];
   expanded: boolean;
   deafened: boolean;
-  onExpand: () => void;
   onCollapse: () => void;
+  onExpand: () => void;
   onToggleDeafen: () => void;
+  onError: (message: string) => void;
 }) {
+  const { microphoneTrack } = useLocalParticipant();
   const participants = useRemoteParticipants();
   const totalCount = participants.length + 1;
   const remoteNames = useMemo(() => users.map((user) => `@${user.username ?? user.name}`), [users]);
+  const [capturePreferences, setCapturePreferences] = useState<
+    Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>
+  >(() => {
+    const prefs = readVoiceCapturePreferences();
+    return {
+      autoGainControl: prefs.autoGainControl,
+      echoCancellation: prefs.echoCancellation,
+      noiseSuppression: prefs.noiseSuppression,
+    };
+  });
+  const { activeDeviceId, devices, setMicDeviceId } = useAudioDevices();
+  const { noiseSuppressionLevel, setNoiseSuppressionLevel } = useNoiseSuppression(microphoneTrack);
+  const meterTrack = microphoneTrack?.audioTrack?.mediaStreamTrack;
+  const meter = useAudioLevelMeter(meterTrack, noiseSuppressionLevel);
+
+  useEffect(() => {
+    writeVoiceCapturePreferences(
+      {
+        autoGainControl: capturePreferences.autoGainControl,
+        echoCancellation: capturePreferences.echoCancellation,
+        noiseSuppression: capturePreferences.noiseSuppression,
+      },
+      readVoiceCapturePreferences(),
+    );
+  }, [capturePreferences]);
 
   return (
     <>
       {!deafened && <RoomAudioRenderer />}
+
+      <VoiceAudioBridge
+        activeDeviceId={activeDeviceId}
+        capturePreferences={capturePreferences}
+        noiseSuppressionLevel={noiseSuppressionLevel}
+        onError={onError}
+      />
 
       <div className="border-t border-[var(--border)] bg-[var(--panel)]">
         <div className="flex min-h-16 flex-wrap items-center justify-between gap-3 px-4 py-3">
@@ -218,7 +504,12 @@ function VoiceRoomSurface({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <VoiceToggleCluster deafened={deafened} onToggleDeafen={onToggleDeafen} />
+            <VoiceToggleCluster
+              deafened={deafened}
+              meterLevel={meter.level}
+              onToggleDeafen={onToggleDeafen}
+              speaking={meter.speaking}
+            />
             <VoiceActionButton onClick={expanded ? onCollapse : onExpand} type="button">
               {expanded ? 'Свернуть' : 'Развернуть'}
             </VoiceActionButton>
@@ -235,12 +526,17 @@ function VoiceRoomSurface({
                   {chat.displayTitle ?? chat.title ?? 'Чат'}
                 </p>
                 <p className="truncate text-sm text-[var(--muted)]">
-                  {totalCount} в звонке • видео включается только когда нужно
+                  {totalCount} в звонке • аудио всегда с DSP, шумодав можно менять на лету
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <VoiceToggleCluster deafened={deafened} onToggleDeafen={onToggleDeafen} />
+                <VoiceToggleCluster
+                  deafened={deafened}
+                  meterLevel={meter.level}
+                  onToggleDeafen={onToggleDeafen}
+                  speaking={meter.speaking}
+                />
                 <VoiceActionButton onClick={onCollapse} type="button">
                   Свернуть
                 </VoiceActionButton>
@@ -260,7 +556,9 @@ function VoiceRoomSurface({
                           {initials(user.username ?? user.name)}
                         </div>
                         <div className="min-w-0">
-                          <p className="truncate text-sm text-[var(--text)]">@{user.username ?? user.name}</p>
+                          <p className="truncate text-sm text-[var(--text)]">
+                            @{user.username ?? user.name}
+                          </p>
                           <p className="text-xs text-[var(--muted)]">В звонке</p>
                         </div>
                       </div>
@@ -276,14 +574,25 @@ function VoiceRoomSurface({
               </div>
 
               <div className="grid content-start gap-4">
+                <VoiceSettingsPanel
+                  activeDeviceId={activeDeviceId}
+                  capturePreferences={capturePreferences}
+                  devices={devices}
+                  microphoneTrack={microphoneTrack}
+                  setCapturePreferences={setCapturePreferences}
+                  setMicDeviceId={setMicDeviceId}
+                  setNoiseSuppressionLevel={setNoiseSuppressionLevel}
+                  noiseSuppressionLevel={noiseSuppressionLevel}
+                />
+
                 <ParticipantVolumeControls />
 
                 <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3">
                   <p className="mb-2 text-sm text-[var(--text)]">Статус</p>
                   <div className="grid gap-2 text-sm text-[var(--muted)]">
-                    <span>Аудио по умолчанию включено.</span>
-                    <span>Камеру включаешь только когда она нужна.</span>
-                    <span>При плохой сети звонок старается переподключиться сам.</span>
+                    <span>Аудио публикуется в LiveKit после входа в звонок.</span>
+                    <span>Микрофон можно менять без перезагрузки страницы.</span>
+                    <span>Если advanced шумодав недоступен, используется browser DSP.</span>
                   </div>
                 </div>
               </div>
@@ -305,6 +614,7 @@ export function VoicePanel({ chat, socket }: { chat: Chat; socket: ChatSocket | 
     queryKey: ['voicePresence', chat.id],
     queryFn: () => api.getVoicePresence(chat.id),
   });
+  const initialPreferences = readVoiceCapturePreferences();
 
   useEffect(() => {
     if (!socket) return;
@@ -359,7 +669,9 @@ export function VoicePanel({ chat, socket }: { chat: Chat; socket: ChatSocket | 
           <div className="min-w-0">
             <p className="text-sm font-medium text-[var(--text)]">Голосовой канал</p>
             <p className="truncate text-xs text-[var(--muted)]">
-              {names.length > 0 ? `${users.length} уже внутри: ${names.join(' • ')}` : 'Сейчас никого нет'}
+              {names.length > 0
+                ? `${users.length} уже внутри: ${names.join(' • ')}`
+                : 'Сейчас никого нет'}
             </p>
           </div>
 
@@ -375,12 +687,7 @@ export function VoicePanel({ chat, socket }: { chat: Chat; socket: ChatSocket | 
 
   return (
     <LiveKitRoom
-      audio={{
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        voiceIsolation: true,
-      }}
+      audio={buildAudioCaptureOptions(initialPreferences)}
       connect
       connectOptions={{ autoSubscribe: true, maxRetries: 12 }}
       onConnected={markJoined}
@@ -388,13 +695,8 @@ export function VoicePanel({ chat, socket }: { chat: Chat; socket: ChatSocket | 
       onError={(nextError) => setError(nextError.message)}
       options={{
         adaptiveStream: true,
+        audioCaptureDefaults: buildAudioCaptureOptions(initialPreferences),
         dynacast: true,
-        audioCaptureDefaults: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          voiceIsolation: true,
-        },
         stopLocalTrackOnUnpublish: false,
       }}
       serverUrl={voice.url}
@@ -407,6 +709,7 @@ export function VoicePanel({ chat, socket }: { chat: Chat; socket: ChatSocket | 
         expanded={expanded}
         onCollapse={() => setExpanded(false)}
         onExpand={() => setExpanded(true)}
+        onError={setError}
         onToggleDeafen={() => setDeafened((value) => !value)}
         users={users}
       />
