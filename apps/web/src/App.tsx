@@ -838,7 +838,7 @@ function ChatView({
               onClick={() => setRoomPanelOpen((value) => !value)}
               type="button"
             >
-              {roomPanelOpen ? 'РЎРєСЂС‹С‚СЊ РєРѕРјРЅР°С‚Сѓ' : 'РџСЂРёРіР»Р°СЃРёС‚СЊ / РёРјСЏ'}
+              {roomPanelOpen ? 'Скрыть комнату' : 'Пригласить / имя'}
             </button>
           )}
           <button

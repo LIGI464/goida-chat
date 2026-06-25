@@ -24,7 +24,12 @@ import {
   serializeChat,
   serializeMessage,
 } from '../services/chat.js';
-import { getOnlineUserIds } from '../services/presence.js';
+import {
+  getOnlineUserIds,
+  getTypingUsers,
+  removeTypingPresence,
+} from '../services/presence.js';
+import { getVoicePresence, removeVoicePresence } from '../services/voice-presence.js';
 
 async function unreadCount(chatId: string, userId: string) {
   const membership = await prisma.chatMember.findUnique({
@@ -317,12 +322,26 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
       where: { chatId_userId: { chatId: params.chatId, userId: session.user.id } },
     });
 
+    await Promise.all([
+      removeTypingPresence(params.chatId, session.user.id),
+      removeVoicePresence(params.chatId, session.user.id),
+    ]);
+    await io.in(`user:${session.user.id}`).socketsLeave(`chat:${params.chatId}`);
+
     const remaining = await prisma.chat.findUnique({
       where: { id: params.chatId },
       include: chatInclude,
     });
 
     invalidateChatLists(chat.members.map((member) => member.userId));
+    io.to(`chat:${params.chatId}`).emit('typing:update', {
+      chatId: params.chatId,
+      users: await getTypingUsers(params.chatId),
+    });
+    io.to(`chat:${params.chatId}`).emit('voice:presence:update', {
+      chatId: params.chatId,
+      users: await getVoicePresence(params.chatId),
+    });
     if (!remaining) return { ok: true };
 
     io.to(`chat:${params.chatId}`).emit('chat:updated', await enrichChat(remaining, session.user.id));
