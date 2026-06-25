@@ -9,7 +9,6 @@ import { ensureChatMember, createTextMessage } from './services/chat.js';
 import {
   addOnlineSocket,
   addTypingPresence,
-  clearTypingPresence,
   getTypingUsers,
   removeOnlineSocket,
   removeTypingPresence,
@@ -171,7 +170,10 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
         await emitTypingPresence(io, chatId);
         ack?.({ ok: true });
       } catch (error) {
-        ack?.({ ok: false, error: error instanceof Error ? error.message : 'Cannot update typing' });
+        ack?.({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Cannot update typing',
+        });
       }
     });
 
@@ -184,7 +186,10 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
         await emitTypingPresence(io, chatId);
         ack?.({ ok: true });
       } catch (error) {
-        ack?.({ ok: false, error: error instanceof Error ? error.message : 'Cannot update typing' });
+        ack?.({
+          ok: false,
+          error: error instanceof Error ? error.message : 'Cannot update typing',
+        });
       }
     });
 
@@ -221,15 +226,14 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
         await emitPresenceToRelatedUsers(io, authed.data.userId, false);
       }
 
-      await Promise.all([
-        ...authed.data.voiceChats,
-        ...authed.data.typingChats,
-      ].map(async (chatId) => {
-        await removeVoicePresence(chatId, authed.data.userId);
-        await removeTypingPresence(chatId, authed.data.userId);
-        await emitVoicePresence(io, chatId);
-        await emitTypingPresence(io, chatId);
-      }));
+      await Promise.all(
+        [...authed.data.voiceChats, ...authed.data.typingChats].map(async (chatId) => {
+          await removeVoicePresence(chatId, authed.data.userId);
+          await removeTypingPresence(chatId, authed.data.userId);
+          await emitVoicePresence(io, chatId);
+          await emitTypingPresence(io, chatId);
+        }),
+      );
     });
   });
 }

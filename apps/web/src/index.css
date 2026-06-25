@@ -3,7 +3,13 @@
 :root {
   color: #eef3ff;
   background: #070a12;
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   --bg: #070a12;
   --panel: #0f1624;
   --panel-2: #151e2e;
@@ -19,8 +25,7 @@
 html {
   background:
     radial-gradient(circle at top left, rgba(109, 93, 252, 0.18), transparent 28%),
-    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 22%),
-    var(--bg);
+    radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 22%), var(--bg);
 }
 
 body {

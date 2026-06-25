@@ -121,6 +121,11 @@ export const api = {
       body: JSON.stringify({ title }),
     });
   },
+  deleteChat(chatId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}`, {
+      method: 'DELETE',
+    });
+  },
   leaveGroupChat(chatId: string) {
     return apiFetch<{ ok: true }>(`/chats/${chatId}/members/me`, {
       method: 'DELETE',

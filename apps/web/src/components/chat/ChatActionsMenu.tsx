@@ -1,0 +1,90 @@
+import { useEffect, useRef, useState } from 'react';
+
+type ChatActionItem = {
+  label: string;
+  onSelect: () => void;
+  tone?: 'default' | 'danger';
+  hidden?: boolean;
+};
+
+export function ChatActionsMenu({
+  items,
+  buttonClassName = '',
+  align = 'right',
+}: {
+  items: ChatActionItem[];
+  buttonClassName?: string;
+  align?: 'left' | 'right';
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const visibleItems = items.filter((item) => !item.hidden);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  if (visibleItems.length === 0) return null;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={`grid h-9 w-9 place-items-center rounded-xl border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)] ${buttonClassName}`}
+        onClick={() => setOpen((value) => !value)}
+        type="button"
+      >
+        ⋯
+      </button>
+
+      {open && (
+        <div
+          className={`absolute top-11 z-30 min-w-52 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-1 shadow-2xl ${
+            align === 'right' ? 'right-0' : 'left-0'
+          }`}
+          role="menu"
+        >
+          {visibleItems.map((item) => (
+            <button
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors duration-150 ${
+                item.tone === 'danger'
+                  ? 'text-red-300 hover:bg-red-500/10'
+                  : 'text-[var(--text)] hover:bg-white/5'
+              }`}
+              key={item.label}
+              onClick={() => {
+                setOpen(false);
+                item.onSelect();
+              }}
+              role="menuitem"
+              type="button"
+            >
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

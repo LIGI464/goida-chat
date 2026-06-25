@@ -92,7 +92,7 @@ export async function buildApp() {
 
   app.get('/health', async () => ({ status: 'ok', service: 'api' }));
   await registerAuthRoutes(app);
-  await registerUserRoutes(app);
+  await registerUserRoutes(app, io);
   await registerChatRoutes(app, io);
   await registerVoiceRoutes(app);
   registerRealtime(io, app.log);

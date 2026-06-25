@@ -91,6 +91,7 @@ services:
       valkey:
         condition: service_healthy
     ports:
+      - '127.0.0.1:7880:7880'
       - '7881:7881/tcp'
       - '59000-59100:59000-59100/udp'
 

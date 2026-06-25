@@ -19,12 +19,13 @@ import {
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 
+import { ChatActionsMenu } from './components/chat/ChatActionsMenu';
 import { api, type Chat, type Message, type PublicUser } from './lib/api';
 import { authClient } from './lib/auth-client';
 import { createChatSocket, type ChatSocket } from './lib/socket';
 
 const VoicePanel = lazy(() =>
-  import('./components/VoicePanel').then((module) => ({ default: module.VoicePanel })),
+  import('./components/voice/VoicePanel').then((module) => ({ default: module.VoicePanel })),
 );
 
 const TERRARIA_ROOM_NAMES = [
@@ -50,9 +51,9 @@ const registrationSchema = signUpSchema
   });
 
 type MessagesPage = { messages: Message[]; nextCursor: string | null };
+type MessagesInfinite = InfiniteData<MessagesPage, string | null>;
 type ChatListData = { chats: Chat[] };
 type CurrentUser = { id: string; name: string; username?: string | null };
-type MessagesInfinite = InfiniteData<MessagesPage, string | null>;
 
 function errorMessage(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -72,6 +73,7 @@ function normalizeUserSearch(value: string) {
 
 function formatChatTime(value?: string | null) {
   if (!value) return '';
+
   return new Intl.DateTimeFormat('ru-RU', {
     hour: '2-digit',
     minute: '2-digit',
@@ -79,7 +81,9 @@ function formatChatTime(value?: string | null) {
 }
 
 function LoadingScreen() {
-  return <main className="grid min-h-screen place-items-center text-[var(--muted)]">Загрузка...</main>;
+  return (
+    <main className="grid min-h-screen place-items-center text-[var(--muted)]">Загрузка...</main>
+  );
 }
 
 function appendMessageToPages(
@@ -109,6 +113,11 @@ function upsertChat(data: ChatListData | undefined, chat: Chat): ChatListData | 
   return { chats: [chat, ...data.chats.filter((item) => item.id !== chat.id)] };
 }
 
+function removeChat(data: ChatListData | undefined, chatId: string): ChatListData | undefined {
+  if (!data) return data;
+  return { chats: data.chats.filter((chat) => chat.id !== chatId) };
+}
+
 function patchChatsWithMessage(
   data: ChatListData | undefined,
   message: Message,
@@ -122,7 +131,9 @@ function patchChatsWithMessage(
 
   const current = data.chats[index]!;
   const unreadCount =
-    message.userId === currentUserId || current.id === selectedChatId ? 0 : (current.unreadCount ?? 0) + 1;
+    message.userId === currentUserId || current.id === selectedChatId
+      ? 0
+      : (current.unreadCount ?? 0) + 1;
   const updated: Chat = {
     ...current,
     lastMessage: message,
@@ -137,10 +148,66 @@ function patchChatsWithMessage(
   return { chats };
 }
 
+function patchChatsWithUser(
+  data: ChatListData | undefined,
+  user: PublicUser,
+  currentUserId: string | null,
+): ChatListData | undefined {
+  if (!data) return data;
+
+  return {
+    chats: data.chats.map((chat) => {
+      const members = chat.members.map((member) =>
+        member.user.id === user.id ? { ...member, user: { ...member.user, ...user } } : member,
+      );
+      const lastMessage =
+        chat.lastMessage?.user.id === user.id
+          ? { ...chat.lastMessage, user: { ...chat.lastMessage.user, ...user } }
+          : chat.lastMessage;
+      const directPeer =
+        chat.type === 'direct'
+          ? members.find((member) => member.user.id !== currentUserId)?.user
+          : null;
+
+      return {
+        ...chat,
+        members,
+        lastMessage,
+        displayTitle:
+          chat.type === 'direct'
+            ? `@${directPeer?.username ?? directPeer?.name ?? 'unknown'}`
+            : (chat.displayTitle ?? chat.title ?? null),
+      };
+    }),
+  };
+}
+
+function patchMessagesWithUser(
+  data: MessagesInfinite | undefined,
+  user: PublicUser,
+): MessagesInfinite | undefined {
+  if (!data) return data;
+
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      messages: page.messages.map((message) =>
+        message.user.id === user.id ? { ...message, user: { ...message.user, ...user } } : message,
+      ),
+    })),
+  };
+}
+
+function patchUsersArray(users: PublicUser[] | undefined, user: PublicUser) {
+  if (!users) return users;
+  return users.map((item) => (item.id === user.id ? { ...item, ...user } : item));
+}
+
 function PublicOnly({ children }: { children: ReactNode }) {
   const { data, isPending } = authClient.useSession();
   if (isPending) return <LoadingScreen />;
-  if (data) return <Navigate to="/app" replace />;
+  if (data) return <Navigate replace to="/app" />;
   return children;
 }
 
@@ -148,7 +215,7 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   const location = useLocation();
   const { data, isPending } = authClient.useSession();
   if (isPending) return <LoadingScreen />;
-  if (!data) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (!data) return <Navigate replace state={{ from: location.pathname }} to="/login" />;
   return children;
 }
 
@@ -209,6 +276,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
         <p className="mb-5 text-sm text-[var(--muted)]">
           {register ? 'Создай приватный аккаунт' : 'С возвращением'}
         </p>
+
         <form className="grid gap-3" onSubmit={submit}>
           <input
             autoComplete="email"
@@ -219,6 +287,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
             type="email"
             value={email}
           />
+
           {register && (
             <input
               autoComplete="username"
@@ -232,6 +301,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
               value={username}
             />
           )}
+
           <input
             autoComplete={register ? 'new-password' : 'current-password'}
             className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
@@ -242,6 +312,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
             type="password"
             value={password}
           />
+
           {register && (
             <input
               autoComplete="new-password"
@@ -254,11 +325,13 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
               value={repeatPassword}
             />
           )}
+
           {error && (
             <p className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
               {error}
             </p>
           )}
+
           <button
             className="h-9 rounded-xl bg-[var(--accent)] px-3 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
             disabled={pending}
@@ -266,7 +339,11 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
             {pending ? 'Подожди...' : register ? 'Создать аккаунт' : 'Войти'}
           </button>
         </form>
-        <Link className="mt-4 block text-sm text-[var(--accent)]" to={register ? '/login' : '/register'}>
+
+        <Link
+          className="mt-4 block text-sm text-[var(--accent)]"
+          to={register ? '/login' : '/register'}
+        >
           {register ? 'Уже есть аккаунт' : 'Создать аккаунт'}
         </Link>
       </section>
@@ -309,7 +386,7 @@ function UserSearchResults({
             key={user.id}
           >
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">@{username}</p>
+              <p className="truncate text-sm font-medium">@{username || user.name}</p>
               <p className="truncate text-xs text-[var(--muted)]">{user.name || 'Игрок'}</p>
             </div>
             <button
@@ -357,7 +434,11 @@ function ProfileDialog({
             <h2 className="text-lg font-semibold">Профиль</h2>
             <p className="text-sm text-[var(--muted)]">Пока только ник, без лишнего шума.</p>
           </div>
-          <button className="text-sm text-[var(--muted)] hover:text-[var(--text)]" onClick={onClose} type="button">
+          <button
+            className="text-sm text-[var(--muted)] hover:text-[var(--text)]"
+            onClick={onClose}
+            type="button"
+          >
             Закрыть
           </button>
         </div>
@@ -375,7 +456,11 @@ function ProfileDialog({
               value={nextUsername}
             />
           </label>
-          {mutation.error && <p className="text-sm text-[var(--danger)]">{errorMessage(mutation.error)}</p>}
+
+          {mutation.error && (
+            <p className="text-sm text-[var(--danger)]">{errorMessage(mutation.error)}</p>
+          )}
+
           <button
             className="h-9 rounded-xl bg-[var(--accent)] px-3 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
             disabled={mutation.isPending}
@@ -402,7 +487,7 @@ function ChatSidebar({
   selectedChatId: string | null;
   socket: ChatSocket | null;
   onOpenProfile: () => void;
-  onSelect: (chatId: string) => void;
+  onSelect: (chatId: string | null) => void;
   onSignOut: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -437,6 +522,19 @@ function ChatSidebar({
     },
   });
 
+  const deleteChatMutation = useMutation({
+    mutationFn: api.deleteChat,
+    onSuccess: (_, chatId) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chatId));
+      queryClient.removeQueries({ queryKey: ['messages', chatId] });
+      queryClient.removeQueries({ queryKey: ['voicePresence', chatId] });
+
+      if (selectedChatId === chatId) {
+        onSelect(chats.find((chat) => chat.id !== chatId)?.id ?? null);
+      }
+    },
+  });
+
   function createGroup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const usernames = groupMembers
@@ -455,15 +553,18 @@ function ChatSidebar({
     };
 
     const presenceUpdate = (payload: { userId: string; isOnline: boolean }) => {
-      queryClient.setQueryData<{ chats: Chat[] }>(['chats'], (old) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => {
         if (!old) return old;
+
         return {
           chats: old.chats.map((chat) => {
             const memberIds = new Set(chat.members.map((member) => member.user.id));
             if (!memberIds.has(payload.userId)) return chat;
+
             const nextOnline = new Set(chat.onlineMemberIds ?? []);
             if (payload.isOnline) nextOnline.add(payload.userId);
             else nextOnline.delete(payload.userId);
+
             return { ...chat, onlineMemberIds: [...nextOnline] };
           }),
         };
@@ -486,7 +587,11 @@ function ChatSidebar({
           <p className="text-sm text-[var(--muted)]">Чаты</p>
           <p className="text-xs text-[var(--muted)]">Личные и общие в одном списке</p>
         </div>
-        <button className="text-xs text-[var(--muted)] hover:text-[var(--text)]" onClick={onSignOut} type="button">
+        <button
+          className="text-xs text-[var(--muted)] hover:text-[var(--text)]"
+          onClick={onSignOut}
+          type="button"
+        >
           Выйти
         </button>
       </div>
@@ -498,12 +603,14 @@ function ChatSidebar({
             чат
           </span>
         </div>
+
         <input
           className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Напиши ник"
           value={search}
         />
+
         {normalizedSearch.length >= 3 && (
           <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
             <UserSearchResults
@@ -515,13 +622,18 @@ function ChatSidebar({
               users={userSearch.data?.users ?? []}
             />
             {directMutation.error && (
-              <p className="p-2 text-xs text-[var(--danger)]">{errorMessage(directMutation.error)}</p>
+              <p className="p-2 text-xs text-[var(--danger)]">
+                {errorMessage(directMutation.error)}
+              </p>
             )}
           </div>
         )}
       </div>
 
-      <form className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3" onSubmit={createGroup}>
+      <form
+        className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3"
+        onSubmit={createGroup}
+      >
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-sm text-[var(--muted)]">Новая комната</p>
           <button
@@ -532,6 +644,7 @@ function ChatSidebar({
             рандом
           </button>
         </div>
+
         <input
           className="mb-2 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
           onChange={(event) => setGroupTitle(event.target.value)}
@@ -544,12 +657,14 @@ function ChatSidebar({
           placeholder="@user1, @user2"
           value={groupMembers}
         />
+
         <button
           className="h-9 w-full rounded-xl bg-[var(--accent)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
           disabled={groupMutation.isPending}
         >
           {groupMutation.isPending ? 'Создаю...' : 'Создать комнату'}
         </button>
+
         {groupMutation.error && (
           <p className="mt-2 text-xs text-[var(--danger)]">{errorMessage(groupMutation.error)}</p>
         )}
@@ -557,11 +672,12 @@ function ChatSidebar({
 
       <div className="mt-3 min-h-0 flex-1 overflow-auto pr-1">
         {chats.length === 0 && <p className="mt-8 text-sm text-[var(--muted)]">Пока пусто</p>}
+
         {chats.map((chat) => {
           const active = chat.id === selectedChatId;
           const members = chat.members
             .filter((member) => member.user.id !== currentUser.id)
-            .map((member) => `@${member.user.username}`)
+            .map((member) => `@${member.user.username ?? member.user.name}`)
             .join(', ');
           const lastTime = formatChatTime(chat.lastMessage?.createdAt);
           const unread = chat.unreadCount ?? 0;
@@ -571,27 +687,74 @@ function ChatSidebar({
             ).length ?? 0;
 
           return (
-            <button
-              className={`mb-2 w-full rounded-xl border px-3 py-3 text-left transition-colors duration-150 ${
+            <div
+              className={`group mb-2 flex items-start gap-2 rounded-2xl border p-2 transition-colors duration-150 ${
                 active
                   ? 'border-[var(--accent)] bg-[var(--accent)]/10'
                   : 'border-[var(--border)] bg-[var(--panel-2)] hover:bg-[var(--panel)]'
               }`}
               key={chat.id}
-              onClick={() => onSelect(chat.id)}
             >
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
-                <div className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
-                  {onlineCount > 0 && <span>{onlineCount} online</span>}
-                  {lastTime && <span>{lastTime}</span>}
-                  {unread > 0 && <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-white">{unread}</span>}
+              <button
+                className="min-w-0 flex-1 rounded-xl px-1 py-1 text-left"
+                onClick={() => onSelect(chat.id)}
+                type="button"
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
+                  <div className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                    {onlineCount > 0 && <span>{onlineCount} online</span>}
+                    {lastTime && <span>{lastTime}</span>}
+                    {unread > 0 && (
+                      <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-white">
+                        {unread}
+                      </span>
+                    )}
+                  </div>
                 </div>
+                <p className="truncate text-xs text-[var(--muted)]">
+                  {chat.lastMessage?.text ?? (members || 'Пусто')}
+                </p>
+              </button>
+
+              <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                <ChatActionsMenu
+                  buttonClassName="h-8 w-8 rounded-xl bg-transparent"
+                  items={[
+                    {
+                      label: 'Выйти из чата',
+                      hidden: chat.type !== 'group',
+                      onSelect: async () => {
+                        await api.leaveGroupChat(chat.id);
+                        queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+                          removeChat(old, chat.id),
+                        );
+                        queryClient.removeQueries({ queryKey: ['messages', chat.id] });
+                        queryClient.removeQueries({ queryKey: ['voicePresence', chat.id] });
+                        if (selectedChatId === chat.id) {
+                          onSelect(chats.find((item) => item.id !== chat.id)?.id ?? null);
+                        }
+                      },
+                    },
+                    {
+                      label: 'Удалить чат',
+                      tone: 'danger',
+                      onSelect: () => {
+                        if (
+                          !window.confirm(
+                            'Удалить чат для всех участников? Сообщения и голосовая комната тоже исчезнут.',
+                          )
+                        ) {
+                          return;
+                        }
+
+                        deleteChatMutation.mutate(chat.id);
+                      },
+                    },
+                  ]}
+                />
               </div>
-              <p className="truncate text-xs text-[var(--muted)]">
-                {chat.lastMessage?.text ?? (members || 'Пусто')}
-              </p>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -615,23 +778,24 @@ function GroupMemberManager({
   onClose,
   onAdded,
   onRename,
-  onLeave,
 }: {
   chat: Chat;
   onClose: () => void;
   onAdded: () => void;
-  onRename: (title: string) => void;
-  onLeave: () => void;
+  onRename: (title: string) => Promise<void>;
 }) {
   const existingUserIds = new Set(chat.members.map((member) => member.user.id));
   const [search, setSearch] = useState('');
   const [title, setTitle] = useState(chat.title ?? '');
+  const [renamePending, setRenamePending] = useState(false);
   const normalizedSearch = normalizeUserSearch(search);
+
   const userSearch = useQuery({
     queryKey: ['group-users', chat.id, normalizedSearch],
     queryFn: () => api.searchUsers(normalizedSearch),
     enabled: normalizedSearch.length >= 3,
   });
+
   const addMemberMutation = useMutation({
     mutationFn: (username: string) => api.addChatMember(chat.id, username),
     onSuccess: () => {
@@ -640,63 +804,118 @@ function GroupMemberManager({
     },
   });
 
-  const availableUsers = (userSearch.data?.users ?? []).filter((user) => !existingUserIds.has(user.id));
+  const availableUsers = (userSearch.data?.users ?? []).filter(
+    (user) => !existingUserIds.has(user.id),
+  );
 
   useEffect(() => {
     setTitle(chat.title ?? '');
   }, [chat.title]);
 
+  async function submitRename() {
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+
+    try {
+      setRenamePending(true);
+      await onRename(nextTitle);
+    } finally {
+      setRenamePending(false);
+    }
+  }
+
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3">
-      <div className="mb-3 grid gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm text-[var(--text)]">Комната</p>
-          <button className="text-xs text-[var(--danger)] hover:brightness-110" onClick={onLeave} type="button">
-            Выйти
-          </button>
+    <div className="rounded-3xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-lg">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-base font-semibold text-[var(--text)]">Настройки комнаты</p>
+          <p className="text-sm text-[var(--muted)]">
+            Переименование и приглашения без перезагрузки.
+          </p>
         </div>
-        <div className="flex gap-2">
+        <button
+          className="text-sm text-[var(--muted)] hover:text-[var(--text)]"
+          onClick={onClose}
+          type="button"
+        >
+          Закрыть
+        </button>
+      </div>
+
+      <div className="mb-4 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-[var(--text)]">Название комнаты</p>
+          <span className="text-xs text-[var(--muted)]">{chat.members.length} участников</span>
+        </div>
+
+        <div className="flex flex-col gap-2 md:flex-row">
           <input
-            className="h-9 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className="h-9 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Переименовать комнату"
             value={title}
           />
           <button
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm transition-colors duration-150 hover:bg-[var(--panel)]"
-            onClick={() => onRename(title.trim())}
+            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm transition-colors duration-150 hover:bg-[var(--panel)] disabled:opacity-50"
+            disabled={renamePending}
+            onClick={() => void submitRename()}
             type="button"
           >
-            Сохранить
+            {renamePending ? 'Сохраняю...' : 'Сохранить'}
           </button>
         </div>
       </div>
 
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-sm text-[var(--text)]">Добавить людей</p>
-        <p className="text-xs text-[var(--muted)]">Поиск и приглашение сразу</p>
-      </div>
-      <input
-        className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="Поиск @username"
-        value={search}
-      />
-      {normalizedSearch.length >= 3 && (
-        <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] p-2">
-          <UserSearchResults
-            actionLabel="Добавить"
-            disabledUsername={null}
-            emptyLabel="Некого добавить"
-            isPending={userSearch.isPending}
-            onAction={(username) => addMemberMutation.mutate(username)}
-            users={availableUsers}
-          />
-          {addMemberMutation.error && (
-            <p className="p-2 text-xs text-[var(--danger)]">{errorMessage(addMemberMutation.error)}</p>
-          )}
+      <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-sm text-[var(--text)]">Сейчас в комнате</p>
+          <p className="text-xs text-[var(--muted)]">Участники</p>
         </div>
-      )}
+
+        <div className="flex flex-wrap gap-2">
+          {chat.members.map((member) => (
+            <span
+              className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-xs text-[var(--text)]"
+              key={member.id}
+            >
+              @{member.user.username ?? member.user.name}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-sm text-[var(--text)]">Пригласить людей</p>
+          <p className="text-xs text-[var(--muted)]">Поиск и добавление сразу</p>
+        </div>
+
+        <input
+          className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Поиск @username"
+          value={search}
+        />
+
+        {normalizedSearch.length >= 3 && (
+          <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
+            <UserSearchResults
+              actionLabel="Добавить"
+              disabledUsername={null}
+              emptyLabel="Некого добавить"
+              isPending={userSearch.isPending}
+              onAction={(username) => addMemberMutation.mutate(username)}
+              users={availableUsers}
+            />
+
+            {addMemberMutation.error && (
+              <p className="p-2 text-xs text-[var(--danger)]">
+                {errorMessage(addMemberMutation.error)}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -707,25 +926,51 @@ function ChatView({
   socket,
   onBack,
   onOpenSidebar,
-  onChatChanged,
 }: {
   chat: Chat;
   currentUserId: string;
   socket: ChatSocket | null;
   onBack: () => void;
   onOpenSidebar: () => void;
-  onChatChanged: () => void;
 }) {
   const queryClient = useQueryClient();
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+
   const messagesQuery = useInfiniteQuery({
     queryKey: ['messages', chat.id],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) => api.getMessages(chat.id, pageParam ?? undefined),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: (title: string) => api.renameChat(chat.id, title),
+    onSuccess: ({ chat: updated }) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => upsertChat(old, updated));
+    },
+  });
+
+  const deleteChatMutation = useMutation({
+    mutationFn: () => api.deleteChat(chat.id),
+    onSuccess: () => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chat.id));
+      queryClient.removeQueries({ queryKey: ['messages', chat.id] });
+      queryClient.removeQueries({ queryKey: ['voicePresence', chat.id] });
+      onBack();
+    },
+  });
+
+  const leaveChatMutation = useMutation({
+    mutationFn: () => api.leaveGroupChat(chat.id),
+    onSuccess: () => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chat.id));
+      queryClient.removeQueries({ queryKey: ['messages', chat.id] });
+      queryClient.removeQueries({ queryKey: ['voicePresence', chat.id] });
+      onBack();
+    },
   });
 
   async function send(event: FormEvent<HTMLFormElement>) {
@@ -740,6 +985,7 @@ function ChatView({
           setError(response.error);
           return;
         }
+
         setText('');
       });
       return;
@@ -808,11 +1054,47 @@ function ChatView({
       .slice()
       .reverse()
       .flatMap((page) => page.messages) ?? [];
-  const nextCursor = messagesQuery.data?.pages[messagesQuery.data.pages.length - 1]?.nextCursor ?? null;
+  const nextCursor =
+    messagesQuery.data?.pages[messagesQuery.data.pages.length - 1]?.nextCursor ?? null;
   const typingUsers = chat.members
     .map((member) => member.user)
     .filter((user) => typingUserIds.includes(user.id) && user.id !== currentUserId)
     .map((user) => `@${user.username ?? user.name}`);
+
+  const groupActions =
+    chat.type === 'group'
+      ? [
+          {
+            label: 'Пригласить или переименовать',
+            onSelect: () => setRoomPanelOpen(true),
+          },
+          {
+            label: 'Выйти из комнаты',
+            onSelect: () => leaveChatMutation.mutate(),
+          },
+          {
+            label: 'Удалить чат',
+            tone: 'danger' as const,
+            onSelect: () => {
+              if (!window.confirm('Удалить комнату для всех участников?')) {
+                return;
+              }
+              deleteChatMutation.mutate();
+            },
+          },
+        ]
+      : [
+          {
+            label: 'Удалить чат',
+            tone: 'danger' as const,
+            onSelect: () => {
+              if (!window.confirm('Удалить этот личный чат целиком?')) {
+                return;
+              }
+              deleteChatMutation.mutate();
+            },
+          },
+        ];
 
   return (
     <section className="flex min-h-screen flex-col bg-[var(--bg)]">
@@ -825,7 +1107,8 @@ function ChatView({
           >
             Чаты
           </button>
-          <div>
+
+          <div className="min-w-0">
             <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
             <p className="text-xs text-[var(--muted)]">{chat.members.length} участник(ов)</p>
           </div>
@@ -834,13 +1117,16 @@ function ChatView({
         <div className="flex items-center gap-2">
           {chat.type === 'group' && (
             <button
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)]"
-              onClick={() => setRoomPanelOpen((value) => !value)}
+              className="hidden h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)] md:inline-flex md:items-center"
+              onClick={() => setRoomPanelOpen(true)}
               type="button"
             >
-              {roomPanelOpen ? 'Скрыть комнату' : 'Пригласить / имя'}
+              Пригласить
             </button>
           )}
+
+          <ChatActionsMenu items={groupActions} />
+
           <button
             className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
             onClick={onBack}
@@ -850,6 +1136,19 @@ function ChatView({
           </button>
         </div>
       </header>
+
+      {chat.type === 'group' && roomPanelOpen && (
+        <div className="border-b border-[var(--border)] px-4 py-4 md:px-6">
+          <GroupMemberManager
+            chat={chat}
+            onAdded={() => queryClient.invalidateQueries({ queryKey: ['chats'] })}
+            onClose={() => setRoomPanelOpen(false)}
+            onRename={async (title) => {
+              await renameMutation.mutateAsync(title);
+            }}
+          />
+        </div>
+      )}
 
       <Suspense
         fallback={
@@ -861,31 +1160,15 @@ function ChatView({
         <VoicePanel chat={chat} socket={socket} />
       </Suspense>
 
-      {chat.type === 'group' && roomPanelOpen && (
-        <div className="border-b border-[var(--border)] px-4 py-3">
-          <GroupMemberManager
-            chat={chat}
-            onClose={() => setRoomPanelOpen(false)}
-            onAdded={onChatChanged}
-            onLeave={async () => {
-              await api.leaveGroupChat(chat.id);
-              queryClient.invalidateQueries({ queryKey: ['chats'] });
-              onBack();
-            }}
-            onRename={async (title) => {
-              if (!title) return;
-              await api.renameChat(chat.id, title);
-              queryClient.invalidateQueries({ queryKey: ['chats'] });
-            }}
-          />
-        </div>
-      )}
-
       <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-6">
-        {messagesQuery.isPending && <p className="text-sm text-[var(--muted)]">Гружу сообщения...</p>}
+        {messagesQuery.isPending && (
+          <p className="text-sm text-[var(--muted)]">Гружу сообщения...</p>
+        )}
+
         {messages.length === 0 && !messagesQuery.isPending && (
           <p className="text-center text-sm text-[var(--muted)]">Пока пусто. Напиши первым.</p>
         )}
+
         {nextCursor && (
           <div className="mb-3 flex justify-center">
             <button
@@ -897,6 +1180,7 @@ function ChatView({
             </button>
           </div>
         )}
+
         <div className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
           {messages.map((message) => {
             const own = message.userId === currentUserId;
@@ -905,8 +1189,10 @@ function ChatView({
               <div className="px-4 py-3" key={message.id}>
                 <div className="mb-1 flex items-center justify-between gap-3">
                   <div className="min-w-0">
-                    <span className={`text-sm font-medium ${own ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
-                      {own ? 'Ты' : `@${message.user.username}`}
+                    <span
+                      className={`text-sm font-medium ${own ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}
+                    >
+                      {own ? 'Ты' : `@${message.user.username ?? message.user.name}`}
                     </span>
                   </div>
                   <span className="shrink-0 text-xs text-[var(--muted)]">
@@ -927,6 +1213,7 @@ function ChatView({
         {typingUsers.length > 0 && (
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
         )}
+
         <form className="flex gap-2" onSubmit={send}>
           <input
             className="h-10 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
@@ -993,6 +1280,28 @@ function ChatLayout() {
     const nextSocket = createChatSocket();
     setSocket(nextSocket);
 
+    const patchUserEverywhere = (user: PublicUser) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        patchChatsWithUser(old, user, currentUserIdRef.current),
+      );
+
+      for (const [queryKey] of queryClient.getQueriesData<MessagesInfinite>({
+        queryKey: ['messages'],
+      })) {
+        queryClient.setQueryData<MessagesInfinite>(queryKey, (old) =>
+          patchMessagesWithUser(old, user),
+        );
+      }
+
+      for (const [queryKey] of queryClient.getQueriesData<{ users: PublicUser[] }>({
+        queryKey: ['voicePresence'],
+      })) {
+        queryClient.setQueryData<{ users: PublicUser[] }>(queryKey, (old) =>
+          old ? { users: patchUsersArray(old.users, user) ?? [] } : old,
+        );
+      }
+    };
+
     nextSocket.on('message:new', (message) => {
       queryClient.setQueryData<MessagesInfinite>(['messages', message.chatId], (old) =>
         appendMessageToPages(old, message),
@@ -1002,12 +1311,43 @@ function ChatLayout() {
       );
     });
 
-    nextSocket.on('chat:updated', (chat) => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) => upsertChat(old, chat));
+    nextSocket.on('chat:created', (chat) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, chat) : { chats: [chat] },
+      );
+      if (!selectedChatIdRef.current) {
+        setSelectedChatId(chat.id);
+      }
     });
 
-    nextSocket.on('chat:list:invalidate', () => {
+    nextSocket.on('chat:updated', (chat) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, chat) : { chats: [chat] },
+      );
+    });
+
+    nextSocket.on('chat:deleted', ({ chatId }) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chatId));
+      queryClient.removeQueries({ queryKey: ['messages', chatId] });
+      queryClient.removeQueries({ queryKey: ['voicePresence', chatId] });
+      setSelectedChatId((current) => (current === chatId ? null : current));
+    });
+
+    nextSocket.on('chat:member-added', ({ chatId }) => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
+      queryClient.invalidateQueries({ queryKey: ['voicePresence', chatId] });
+    });
+
+    nextSocket.on('chat:member-removed', ({ chatId }) => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      queryClient.invalidateQueries({ queryKey: ['voicePresence', chatId] });
+    });
+
+    nextSocket.on('user:updated', ({ user }) => {
+      if (user.id === currentUserIdRef.current) {
+        setLocalUsername(user.username ?? user.name);
+      }
+      patchUserEverywhere(user);
     });
 
     nextSocket.on('message:error', (payload) => {
@@ -1058,8 +1398,8 @@ function ChatLayout() {
             onOpenProfile={() => setProfileOpen(true)}
             onSelect={setSelectedChatId}
             onSignOut={signOut}
-            socket={socket}
             selectedChatId={selectedChatId}
+            socket={socket}
           />
         </div>
 
@@ -1070,7 +1410,6 @@ function ChatLayout() {
               currentUserId={currentUser.id}
               onBack={() => setSelectedChatId(null)}
               onOpenSidebar={() => setSidebarOpen(true)}
-              onChatChanged={() => queryClient.invalidateQueries({ queryKey: ['chats'] })}
               socket={socket}
             />
           ) : (
@@ -1105,8 +1444,8 @@ function ChatLayout() {
               onOpenProfile={() => setProfileOpen(true)}
               onSelect={setSelectedChatId}
               onSignOut={signOut}
-              socket={socket}
               selectedChatId={selectedChatId}
+              socket={socket}
             />
           </div>
         </div>
@@ -1150,7 +1489,7 @@ export function App() {
         }
         path="/app"
       />
-      <Route element={<Navigate to="/app" replace />} path="*" />
+      <Route element={<Navigate replace to="/app" />} path="*" />
     </Routes>
   );
 }
