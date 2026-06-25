@@ -1,5 +1,11 @@
 import { signInSchema, signUpSchema } from '@goida-chat/shared';
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 import {
   Suspense,
   lazy,
@@ -44,7 +50,9 @@ const registrationSchema = signUpSchema
   });
 
 type MessagesPage = { messages: Message[]; nextCursor: string | null };
+type ChatListData = { chats: Chat[] };
 type CurrentUser = { id: string; name: string; username?: string | null };
+type MessagesInfinite = InfiniteData<MessagesPage, string | null>;
 
 function errorMessage(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -58,6 +66,10 @@ function randomRoomTitle() {
   return TERRARIA_ROOM_NAMES[Math.floor(Math.random() * TERRARIA_ROOM_NAMES.length)]!;
 }
 
+function normalizeUserSearch(value: string) {
+  return value.trim().toLowerCase().replace(/^@+/, '');
+}
+
 function formatChatTime(value?: string | null) {
   if (!value) return '';
   return new Intl.DateTimeFormat('ru-RU', {
@@ -68,6 +80,61 @@ function formatChatTime(value?: string | null) {
 
 function LoadingScreen() {
   return <main className="grid min-h-screen place-items-center text-[var(--muted)]">Загрузка...</main>;
+}
+
+function appendMessageToPages(
+  data: MessagesInfinite | undefined,
+  message: Message,
+): MessagesInfinite {
+  if (!data) {
+    return {
+      pages: [{ messages: [message], nextCursor: null }],
+      pageParams: [null],
+    };
+  }
+
+  if (data.pages.some((page) => page.messages.some((item) => item.id === message.id))) {
+    return data;
+  }
+
+  const pages = [...data.pages];
+  const latestPage = pages[0] ?? { messages: [], nextCursor: null };
+  pages[0] = { ...latestPage, messages: [...latestPage.messages, message] };
+
+  return { ...data, pages };
+}
+
+function upsertChat(data: ChatListData | undefined, chat: Chat): ChatListData | undefined {
+  if (!data) return data;
+  return { chats: [chat, ...data.chats.filter((item) => item.id !== chat.id)] };
+}
+
+function patchChatsWithMessage(
+  data: ChatListData | undefined,
+  message: Message,
+  currentUserId: string | null,
+  selectedChatId: string | null,
+): ChatListData | undefined {
+  if (!data) return data;
+
+  const index = data.chats.findIndex((chat) => chat.id === message.chatId);
+  if (index === -1) return data;
+
+  const current = data.chats[index]!;
+  const unreadCount =
+    message.userId === currentUserId || current.id === selectedChatId ? 0 : (current.unreadCount ?? 0) + 1;
+  const updated: Chat = {
+    ...current,
+    lastMessage: message,
+    updatedAt: message.createdAt,
+    unreadCount,
+  };
+
+  const chats = [...data.chats];
+  chats.splice(index, 1);
+  chats.unshift(updated);
+
+  return { chats };
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
@@ -342,7 +409,7 @@ function ChatSidebar({
   const [search, setSearch] = useState('');
   const [groupTitle, setGroupTitle] = useState(() => randomRoomTitle());
   const [groupMembers, setGroupMembers] = useState('');
-  const normalizedSearch = search.trim().toLowerCase();
+  const normalizedSearch = normalizeUserSearch(search);
 
   const userSearch = useQuery({
     queryKey: ['users', normalizedSearch],
@@ -423,14 +490,6 @@ function ChatSidebar({
           Выйти
         </button>
       </div>
-
-      <button
-        className="mb-3 h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-left text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel)]"
-        onClick={onOpenProfile}
-        type="button"
-      >
-        @{currentUser.username ?? currentUser.name}
-      </button>
 
       <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
         <div className="mb-2 flex items-center justify-between gap-3">
@@ -553,11 +612,13 @@ function ChatSidebar({
 
 function GroupMemberManager({
   chat,
+  onClose,
   onAdded,
   onRename,
   onLeave,
 }: {
   chat: Chat;
+  onClose: () => void;
   onAdded: () => void;
   onRename: (title: string) => void;
   onLeave: () => void;
@@ -565,7 +626,7 @@ function GroupMemberManager({
   const existingUserIds = new Set(chat.members.map((member) => member.user.id));
   const [search, setSearch] = useState('');
   const [title, setTitle] = useState(chat.title ?? '');
-  const normalizedSearch = search.trim().toLowerCase();
+  const normalizedSearch = normalizeUserSearch(search);
   const userSearch = useQuery({
     queryKey: ['group-users', chat.id, normalizedSearch],
     queryFn: () => api.searchUsers(normalizedSearch),
@@ -587,7 +648,7 @@ function GroupMemberManager({
 
   return (
     <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3">
-      <div className="mb-3 grid gap-2">
+      <div className="mb-3 grid gap-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm text-[var(--text)]">Комната</p>
           <button className="text-xs text-[var(--danger)] hover:brightness-110" onClick={onLeave} type="button">
@@ -659,6 +720,7 @@ function ChatView({
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
+  const [roomPanelOpen, setRoomPanelOpen] = useState(false);
   const messagesQuery = useInfiniteQuery({
     queryKey: ['messages', chat.id],
     initialPageParam: null as string | null,
@@ -685,11 +747,12 @@ function ChatView({
 
     try {
       const { message } = await api.sendMessage(chat.id, value);
-      queryClient.setQueryData<MessagesPage>(['messages', chat.id], (old) => ({
-        messages: [...(old?.messages ?? []), message],
-        nextCursor: old?.nextCursor ?? null,
-      }));
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      queryClient.setQueryData<MessagesInfinite>(['messages', chat.id], (old) =>
+        appendMessageToPages(old, message),
+      );
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        patchChatsWithMessage(old, message, currentUserId, chat.id),
+      );
       setText('');
     } catch (caught) {
       setError(errorMessage(caught));
@@ -736,6 +799,10 @@ function ChatView({
     queryClient.invalidateQueries({ queryKey: ['chats'] });
   }, [chat.id, messagesQuery.data, queryClient]);
 
+  useEffect(() => {
+    setRoomPanelOpen(false);
+  }, [chat.id]);
+
   const messages =
     messagesQuery.data?.pages
       .slice()
@@ -748,8 +815,8 @@ function ChatView({
     .map((user) => `@${user.username ?? user.name}`);
 
   return (
-    <section className="grid min-h-screen grid-rows-[72px_auto_auto_1fr_auto] bg-[var(--bg)]">
-      <header className="flex items-center justify-between border-b border-[var(--border)] px-4 md:px-5">
+    <section className="flex min-h-screen flex-col bg-[var(--bg)]">
+      <header className="flex min-h-[72px] shrink-0 items-center justify-between border-b border-[var(--border)] px-4 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <button
             className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
@@ -765,9 +832,15 @@ function ChatView({
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="hidden text-xs text-[var(--muted)] sm:inline">
-            {socket?.connected ? 'realtime on' : 'realtime off'}
-          </span>
+          {chat.type === 'group' && (
+            <button
+              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)]"
+              onClick={() => setRoomPanelOpen((value) => !value)}
+              type="button"
+            >
+              {roomPanelOpen ? 'РЎРєСЂС‹С‚СЊ РєРѕРјРЅР°С‚Сѓ' : 'РџСЂРёРіР»Р°СЃРёС‚СЊ / РёРјСЏ'}
+            </button>
+          )}
           <button
             className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
             onClick={onBack}
@@ -788,10 +861,11 @@ function ChatView({
         <VoicePanel chat={chat} socket={socket} />
       </Suspense>
 
-      {chat.type === 'group' && (
+      {chat.type === 'group' && roomPanelOpen && (
         <div className="border-b border-[var(--border)] px-4 py-3">
           <GroupMemberManager
             chat={chat}
+            onClose={() => setRoomPanelOpen(false)}
             onAdded={onChatChanged}
             onLeave={async () => {
               await api.leaveGroupChat(chat.id);
@@ -807,7 +881,7 @@ function ChatView({
         </div>
       )}
 
-      <div className="min-h-0 overflow-auto px-4 py-4 md:px-6">
+      <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-6">
         {messagesQuery.isPending && <p className="text-sm text-[var(--muted)]">Гружу сообщения...</p>}
         {messages.length === 0 && !messagesQuery.isPending && (
           <p className="text-center text-sm text-[var(--muted)]">Пока пусто. Напиши первым.</p>
@@ -848,7 +922,7 @@ function ChatView({
         </div>
       </div>
 
-      <footer className="border-t border-[var(--border)] bg-[var(--panel)] p-3">
+      <footer className="shrink-0 border-t border-[var(--border)] bg-[var(--panel)] p-3">
         {error && <p className="mb-2 text-sm text-[var(--danger)]">{error}</p>}
         {typingUsers.length > 0 && (
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
@@ -877,7 +951,6 @@ function ChatLayout() {
   const baseUser = data?.user as CurrentUser | undefined;
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [socket, setSocket] = useState<ChatSocket | null>(null);
-  const [socketState, setSocketState] = useState('disconnected');
   const [profileOpen, setProfileOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [socketGeneration, setSocketGeneration] = useState(0);
@@ -919,31 +992,18 @@ function ChatLayout() {
   useEffect(() => {
     const nextSocket = createChatSocket();
     setSocket(nextSocket);
-    setSocketState(nextSocket.connected ? 'connected' : 'connecting');
 
     nextSocket.on('message:new', (message) => {
-      queryClient.setQueryData<MessagesPage>(['messages', message.chatId], (old) => {
-        if (!old) return old;
-        if (old.messages.some((item) => item.id === message.id)) return old;
-        return { ...old, messages: [...old.messages, message] };
-      });
-      queryClient.setQueryData<{ chats: Chat[] }>(['chats'], (old) => {
-        if (!old) return old;
-        return {
-          chats: old.chats.map((chat) => {
-            if (chat.id !== message.chatId) return chat;
-            const unreadCount =
-              chat.id === selectedChatIdRef.current || message.userId === currentUserIdRef.current
-                ? 0
-                : (chat.unreadCount ?? 0) + 1;
-            return { ...chat, unreadCount };
-          }),
-        };
-      });
+      queryClient.setQueryData<MessagesInfinite>(['messages', message.chatId], (old) =>
+        appendMessageToPages(old, message),
+      );
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        patchChatsWithMessage(old, message, currentUserIdRef.current, selectedChatIdRef.current),
+      );
     });
 
-    nextSocket.on('chat:updated', () => {
-      queryClient.invalidateQueries({ queryKey: ['chats'] });
+    nextSocket.on('chat:updated', (chat) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => upsertChat(old, chat));
     });
 
     nextSocket.on('chat:list:invalidate', () => {
@@ -953,10 +1013,6 @@ function ChatLayout() {
     nextSocket.on('message:error', (payload) => {
       console.warn(payload.message);
     });
-
-    nextSocket.on('connect', () => setSocketState('connected'));
-    nextSocket.on('disconnect', () => setSocketState('disconnected'));
-    nextSocket.on('connect_error', () => setSocketState('reconnecting'));
 
     return () => {
       nextSocket.disconnect();
@@ -1055,10 +1111,6 @@ function ChatLayout() {
           </div>
         </div>
       )}
-
-      <div className="fixed bottom-3 right-3 rounded-full border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-xs text-[var(--muted)] shadow-lg">
-        {socketState}
-      </div>
 
       {profileOpen && (
         <ProfileDialog

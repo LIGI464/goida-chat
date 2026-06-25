@@ -87,6 +87,14 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     }
   }
 
+  async function invalidateChatMembers(chatId: string) {
+    const members = await prisma.chatMember.findMany({
+      where: { chatId },
+      select: { userId: true },
+    });
+    invalidateChatLists(members.map((member) => member.userId));
+  }
+
   app.get('/chats', async (request) => {
     const session = await requireSession(request);
     const chats = await prisma.chat.findMany({
@@ -351,7 +359,7 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     const message = await createTextMessage(params.chatId, session.user.id, body.text);
 
     io.to(`chat:${params.chatId}`).emit('message:new', message);
-    invalidateChatLists([session.user.id]);
+    await invalidateChatMembers(params.chatId);
 
     return { message };
   });

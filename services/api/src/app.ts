@@ -17,6 +17,19 @@ import { registerUserRoutes } from './routes/users.js';
 import { registerVoiceRoutes } from './routes/voice.js';
 
 const appOrigin = new URL(env.APP_URL).origin;
+const devOrigins = new Set(['localhost', '127.0.0.1']);
+
+function isAllowedOrigin(origin?: string | null) {
+  if (!origin) return true;
+
+  try {
+    const parsed = new URL(origin);
+    if (parsed.origin === appOrigin) return true;
+    return env.NODE_ENV !== 'production' && devOrigins.has(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 export async function buildApp() {
   const app = Fastify({
@@ -26,7 +39,7 @@ export async function buildApp() {
   });
 
   await app.register(cors, {
-    origin: appOrigin,
+    origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
     credentials: true,
   });
   await app.register(helmet, {
@@ -63,10 +76,13 @@ export async function buildApp() {
   });
 
   const io = new SocketServer(app.server, {
-    cors: { origin: appOrigin, credentials: true },
+    cors: {
+      origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+      credentials: true,
+    },
     allowRequest: (request, callback) => {
       const origin = request.headers.origin;
-      if (!origin || origin === appOrigin) {
+      if (isAllowedOrigin(origin)) {
         callback(null, true);
         return;
       }

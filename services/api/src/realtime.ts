@@ -81,6 +81,17 @@ async function emitPresenceToRelatedUsers(io: SocketServer, userId: string, isOn
   }
 }
 
+async function invalidateChatLists(io: SocketServer, chatId: string) {
+  const members = await prisma.chatMember.findMany({
+    where: { chatId },
+    select: { userId: true },
+  });
+
+  for (const member of members) {
+    io.to(`user:${member.userId}`).emit('chat:list:invalidate');
+  }
+}
+
 export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
   io.use(async (socket, next) => {
     try {
@@ -141,6 +152,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
         const input = messageInputSchema.parse(payload);
         const message = await createTextMessage(input.chatId, authed.data.userId, input.text);
         io.to(`chat:${input.chatId}`).emit('message:new', message);
+        await invalidateChatLists(io, input.chatId);
         ack?.({ ok: true, data: message });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Cannot send message';

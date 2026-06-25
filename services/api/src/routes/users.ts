@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { updateProfileSchema, usernameSchema } from '@goida-chat/shared';
+import { updateProfileSchema } from '@goida-chat/shared';
 
 import { badRequest } from '../lib/http.js';
 import { prisma } from '../lib/prisma.js';
@@ -12,18 +12,21 @@ export async function registerUserRoutes(app: FastifyInstance) {
     { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
     async (request) => {
       const session = await requireSession(request);
-      const parsed = usernameSchema.safeParse(
-        (request.query as { username?: string }).username ?? '',
-      );
+      const rawQuery = ((request.query as { username?: string }).username ?? '').trim();
+      const normalizedQuery = rawQuery.replace(/^@+/, '').toLowerCase();
 
-      if (!parsed.success) {
+      if (normalizedQuery.length < 2) {
         return { users: [] };
       }
 
       const users = await prisma.user.findMany({
         where: {
           id: { not: session.user.id },
-          username: { contains: parsed.data, mode: 'insensitive' },
+          OR: [
+            { username: { contains: normalizedQuery, mode: 'insensitive' } },
+            { displayUsername: { contains: normalizedQuery, mode: 'insensitive' } },
+            { name: { contains: rawQuery.replace(/^@+/, ''), mode: 'insensitive' } },
+          ],
         },
         orderBy: { username: 'asc' },
         take: 10,
