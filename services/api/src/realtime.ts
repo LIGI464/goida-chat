@@ -4,7 +4,16 @@ import type { Server as SocketServer, Socket } from 'socket.io';
 import { messageInputSchema } from '@goida-chat/shared';
 
 import { auth } from './auth.js';
+import { prisma } from './lib/prisma.js';
 import { ensureChatMember, createTextMessage } from './services/chat.js';
+import {
+  addOnlineSocket,
+  addTypingPresence,
+  clearTypingPresence,
+  getTypingUsers,
+  removeOnlineSocket,
+  removeTypingPresence,
+} from './services/presence.js';
 import {
   addVoicePresence,
   getVoicePresence,
@@ -18,6 +27,7 @@ type AuthSocket = Socket & {
     userId: string;
     username?: string | null;
     voiceChats: Set<string>;
+    typingChats: Set<string>;
     rateLimits: Map<string, { count: number; resetAt: number }>;
   };
 };
@@ -42,6 +52,35 @@ async function emitVoicePresence(io: SocketServer, chatId: string) {
   io.to(`chat:${chatId}`).emit('voice:presence:update', { chatId, users });
 }
 
+async function emitTypingPresence(io: SocketServer, chatId: string) {
+  const users = await getTypingUsers(chatId);
+  io.to(`chat:${chatId}`).emit('typing:update', { chatId, users });
+}
+
+async function emitPresenceToRelatedUsers(io: SocketServer, userId: string, isOnline: boolean) {
+  const chats = await prisma.chat.findMany({
+    where: { members: { some: { userId } } },
+    select: {
+      members: {
+        select: { userId: true },
+      },
+    },
+  });
+
+  const recipientIds = new Set<string>();
+  for (const chat of chats) {
+    for (const member of chat.members) {
+      if (member.userId !== userId) {
+        recipientIds.add(member.userId);
+      }
+    }
+  }
+
+  for (const recipientId of recipientIds) {
+    io.to(`user:${recipientId}`).emit('presence:update', { userId, isOnline });
+  }
+}
+
 export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
   io.use(async (socket, next) => {
     try {
@@ -54,6 +93,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
       socket.data.userId = session.user.id;
       socket.data.username = (session.user as { username?: string | null }).username;
       socket.data.voiceChats = new Set<string>();
+      socket.data.typingChats = new Set<string>();
       socket.data.rateLimits = new Map<string, { count: number; resetAt: number }>();
       return next();
     } catch (error) {
@@ -65,6 +105,14 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
   io.on('connection', (socket) => {
     const authed = socket as AuthSocket;
     log.debug({ socketId: socket.id, userId: authed.data.userId }, 'socket connected');
+    void socket.join(`user:${authed.data.userId}`);
+
+    void (async () => {
+      const becameOnline = await addOnlineSocket(authed.data.userId, socket.id);
+      if (becameOnline) {
+        await emitPresenceToRelatedUsers(io, authed.data.userId, true);
+      }
+    })();
 
     socket.on('chat:join', async (payload: { chatId?: string }, ack?: Ack) => {
       try {
@@ -81,6 +129,9 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
     socket.on('chat:leave', async (payload: { chatId?: string }, ack?: Ack) => {
       const chatId = payload.chatId ?? '';
       await socket.leave(`chat:${chatId}`);
+      authed.data.typingChats.delete(chatId);
+      await removeTypingPresence(chatId, authed.data.userId);
+      await emitTypingPresence(io, chatId);
       ack?.({ ok: true });
     });
 
@@ -95,6 +146,33 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
         const message = error instanceof Error ? error.message : 'Cannot send message';
         socket.emit('message:error', { message });
         ack?.({ ok: false, error: message });
+      }
+    });
+
+    socket.on('typing:start', async (payload: { chatId?: string }, ack?: Ack) => {
+      try {
+        assertSocketRateLimit(authed, 'typing:start', 60, 60_000);
+        const chatId = payload.chatId ?? '';
+        await ensureChatMember(authed.data.userId, chatId);
+        authed.data.typingChats.add(chatId);
+        await addTypingPresence(chatId, authed.data.userId);
+        await emitTypingPresence(io, chatId);
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: error instanceof Error ? error.message : 'Cannot update typing' });
+      }
+    });
+
+    socket.on('typing:stop', async (payload: { chatId?: string }, ack?: Ack) => {
+      try {
+        assertSocketRateLimit(authed, 'typing:stop', 60, 60_000);
+        const chatId = payload.chatId ?? '';
+        authed.data.typingChats.delete(chatId);
+        await removeTypingPresence(chatId, authed.data.userId);
+        await emitTypingPresence(io, chatId);
+        ack?.({ ok: true });
+      } catch (error) {
+        ack?.({ ok: false, error: error instanceof Error ? error.message : 'Cannot update typing' });
       }
     });
 
@@ -126,12 +204,20 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
     });
 
     socket.on('disconnect', async () => {
-      await Promise.all(
-        [...authed.data.voiceChats].map(async (chatId) => {
-          await removeVoicePresence(chatId, authed.data.userId);
-          await emitVoicePresence(io, chatId);
-        }),
-      );
+      const becameOffline = await removeOnlineSocket(authed.data.userId, socket.id);
+      if (becameOffline) {
+        await emitPresenceToRelatedUsers(io, authed.data.userId, false);
+      }
+
+      await Promise.all([
+        ...authed.data.voiceChats,
+        ...authed.data.typingChats,
+      ].map(async (chatId) => {
+        await removeVoicePresence(chatId, authed.data.userId);
+        await removeTypingPresence(chatId, authed.data.userId);
+        await emitVoicePresence(io, chatId);
+        await emitTypingPresence(io, chatId);
+      }));
     });
   });
 }

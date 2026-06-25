@@ -35,6 +35,12 @@ export type Chat = {
   updatedAt: string;
   members: ChatMember[];
   lastMessage: Message | null;
+  unreadCount?: number;
+  onlineMemberIds?: string[];
+};
+
+export type SessionUser = PublicUser & {
+  email: string;
 };
 
 export type VoiceToken = {
@@ -82,10 +88,26 @@ export const api = {
       body: JSON.stringify({ title, memberUsernames }),
     });
   },
-  getMessages(chatId: string) {
+  addChatMember(chatId: string, username: string) {
+    return apiFetch<{ chat: Chat }>(`/chats/${chatId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    });
+  },
+  getMessages(chatId: string, cursor?: string) {
+    const suffix = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
     return apiFetch<{ messages: Message[]; nextCursor: string | null }>(
-      `/chats/${chatId}/messages`,
+      `/chats/${chatId}/messages${suffix}`,
     );
+  },
+  markChatRead(chatId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}/read`, { method: 'POST' });
+  },
+  startTyping(chatId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}/typing/start`, { method: 'POST' });
+  },
+  stopTyping(chatId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}/typing/stop`, { method: 'POST' });
   },
   sendMessage(chatId: string, text: string) {
     return apiFetch<{ message: Message }>(`/chats/${chatId}/messages`, {
@@ -93,10 +115,30 @@ export const api = {
       body: JSON.stringify({ text }),
     });
   },
+  renameChat(chatId: string, title: string) {
+    return apiFetch<{ chat: Chat }>(`/chats/${chatId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    });
+  },
+  leaveGroupChat(chatId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}/members/me`, {
+      method: 'DELETE',
+    });
+  },
   getVoiceToken(chatId: string) {
     return apiFetch<VoiceToken>(`/chats/${chatId}/voice/token`, { method: 'POST' });
   },
   getVoicePresence(chatId: string) {
     return apiFetch<{ users: PublicUser[] }>(`/chats/${chatId}/voice/presence`);
+  },
+  getMe() {
+    return apiFetch<{ user: SessionUser; session: { id: string; expiresAt: string } }>('/auth/me');
+  },
+  updateProfile(username: string) {
+    return apiFetch<{ user: PublicUser }>('/users/me', {
+      method: 'PATCH',
+      body: JSON.stringify({ username }),
+    });
   },
 };

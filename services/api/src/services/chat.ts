@@ -97,6 +97,7 @@ export function serializeChat(chat: ChatWithDetails, currentUserId: string) {
     updatedAt: chat.updatedAt,
     members,
     lastMessage: chat.messages[0] ? serializeMessage(chat.messages[0]) : null,
+    unreadCount: 0,
     voiceRoom: chat.voiceRoom,
   };
 }
@@ -121,6 +122,10 @@ export async function createTextMessage(chatId: string, userId: string, text: st
     const created = await tx.message.create({
       data: { chatId, userId, text },
       select: messageSelect,
+    });
+    await tx.chatMember.update({
+      where: { chatId_userId: { chatId, userId } },
+      data: { lastReadMessageId: created.id },
     });
     await tx.chat.update({
       where: { id: chatId },
