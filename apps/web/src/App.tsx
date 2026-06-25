@@ -481,10 +481,14 @@ function ChatSidebar({
 
   return (
     <aside className="flex min-h-screen flex-col border-r border-[var(--border)] bg-[var(--panel)] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-[var(--muted)]">Чаты</p>
-          <p className="text-xs text-[var(--muted)]">Личные и общие в одном списке</p>
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <img
+            alt="Goida Chat"
+            className="h-10 w-auto max-w-[190px] object-contain"
+            src="/goida-logo-horizontal.png"
+          />
+          <p className="mt-2 text-xs text-[var(--muted)]">Личные и общие в одном списке</p>
         </div>
         <button className="text-xs text-[var(--muted)] hover:text-[var(--text)]" onClick={onSignOut} type="button">
           Выйти
