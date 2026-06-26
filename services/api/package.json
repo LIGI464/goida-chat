@@ -8,9 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file ../../.env dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "db:generate": "node --env-file ../../.env ../../node_modules/prisma/build/index.js generate",
-    "db:migrate": "node --env-file ../../.env ../../node_modules/prisma/build/index.js migrate dev",
-    "db:deploy": "node --env-file ../../.env ../../node_modules/prisma/build/index.js migrate deploy",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "db:seed": "node --env-file ../../.env --import tsx prisma/seed.ts",
     "db:reset-chats": "node --env-file ../../.env --import tsx prisma/reset-chats.ts"
   },
