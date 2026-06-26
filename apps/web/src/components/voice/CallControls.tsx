@@ -11,6 +11,9 @@ function tone(active: boolean, danger = false) {
     : 'border-[var(--border)] bg-[var(--panel)] text-[var(--text)] hover:bg-[var(--panel-2)]';
 }
 
+const controlClassName =
+  'inline-flex h-11 min-w-[132px] flex-1 items-center justify-center rounded-2xl border px-4 text-sm font-medium whitespace-nowrap transition-colors duration-150 sm:flex-none';
+
 export function CallControls({
   deafened,
   onToggleDeafen,
@@ -23,40 +26,38 @@ export function CallControls({
   const { isCameraEnabled, isMicrophoneEnabled } = useLocalParticipant();
 
   return (
-    <div className="flex flex-wrap items-center gap-2 overflow-x-auto pb-1">
+    <div className="flex min-w-0 flex-wrap items-stretch justify-end gap-2">
       <TrackToggle
-        className={`h-10 rounded-2xl border px-4 text-sm font-medium transition-colors duration-150 ${tone(isMicrophoneEnabled)}`}
+        className={`${controlClassName} ${tone(isMicrophoneEnabled)}`}
         source={Track.Source.Microphone}
       >
-        {isMicrophoneEnabled ? 'Mic on' : 'Mic off'}
+        {isMicrophoneEnabled ? 'Микрофон вкл' : 'Микрофон выкл'}
       </TrackToggle>
 
       <TrackToggle
-        className={`h-10 rounded-2xl border px-4 text-sm font-medium transition-colors duration-150 ${tone(isCameraEnabled)}`}
+        className={`${controlClassName} ${tone(isCameraEnabled)}`}
         source={Track.Source.Camera}
       >
-        {isCameraEnabled ? 'Camera on' : 'Camera off'}
+        {isCameraEnabled ? 'Камера вкл' : 'Камера выкл'}
       </TrackToggle>
 
       <button
-        className={`h-10 rounded-2xl border px-4 text-sm font-medium transition-colors duration-150 ${tone(deafened)}`}
+        className={`${controlClassName} ${tone(deafened)}`}
         onClick={onToggleDeafen}
         type="button"
       >
-        {deafened ? 'Undeafen' : 'Deafen'}
+        {deafened ? 'Звук выкл' : 'Звук вкл'}
       </button>
 
       <button
-        className={`h-10 rounded-2xl border px-4 text-sm font-medium transition-colors duration-150 ${tone(false)}`}
+        className={`${controlClassName} ${tone(false)}`}
         onClick={onOpenSettings}
         type="button"
       >
         Настройки
       </button>
 
-      <DisconnectButton
-        className={`h-10 rounded-2xl border px-4 text-sm font-medium transition-colors duration-150 ${tone(false, true)}`}
-      >
+      <DisconnectButton className={`${controlClassName} ${tone(false, true)}`}>
         Выйти
       </DisconnectButton>
     </div>

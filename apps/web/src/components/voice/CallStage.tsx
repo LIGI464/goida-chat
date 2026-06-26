@@ -14,7 +14,7 @@ import type {
   VoiceCapturePreferences,
 } from '../../features/voice/audio/audioConstraints';
 import { useAudioLevelMeter } from '../../features/voice/audio/useAudioLevelMeter';
-import type { PublicUser, Chat } from '../../lib/api';
+import type { Chat, PublicUser } from '../../lib/api';
 import { AudioSettingsDrawer } from './AudioSettingsDrawer';
 import { CallControls } from './CallControls';
 import { ParticipantTile } from './ParticipantTile';
@@ -85,11 +85,20 @@ export function CallStage({
     });
   }, [remoteParticipants]);
 
-  const stageHeight = participants.some((participant) => participant.isCameraEnabled)
-    ? 'min-h-[380px]'
-    : participants.length > 3
-      ? 'min-h-[360px]'
-      : 'min-h-[320px]';
+  const hasCamera = participants.some((participant) => participant.isCameraEnabled);
+  const participantCount = participants.length;
+  const stageViewportClass =
+    participantCount === 1
+      ? 'min-h-[280px] max-h-[min(48vh,420px)] md:min-h-[320px] md:max-h-[min(52vh,460px)]'
+      : hasCamera
+        ? 'min-h-[320px] max-h-[min(60vh,620px)]'
+        : 'min-h-[320px] max-h-[min(56vh,540px)]';
+  const participantGridClass =
+    participantCount === 1
+      ? 'mx-auto max-w-[420px] grid-cols-1'
+      : participantCount === 2
+        ? 'mx-auto max-w-5xl grid-cols-1 md:grid-cols-2'
+        : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3';
 
   const remoteVolumes = remoteParticipants.map((participant) => ({
     identity: participant.identity,
@@ -98,10 +107,10 @@ export function CallStage({
   }));
 
   return (
-    <section className="border-b border-[var(--border)] bg-[var(--bg)] px-4 py-4 md:px-6">
+    <section className="shrink-0 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-4 md:px-6">
       <div className="relative overflow-hidden rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(15,22,36,0.98),rgba(9,14,23,0.98))] shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border)] px-4 py-4 md:px-5">
-          <div className="min-w-0">
+        <div className="flex flex-col gap-4 border-b border-[var(--border)] px-4 py-4 md:px-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1">
             <div className="mb-1 flex flex-wrap items-center gap-2">
               <p className="truncate text-base font-semibold text-[var(--text)]">
                 {chat.displayTitle ?? chat.title ?? 'Комната'}
@@ -120,7 +129,7 @@ export function CallStage({
                   {users
                     .map((user) => `@${user.username ?? user.name}`)
                     .slice(0, 4)
-                    .join(' · ')}
+                    .join(' / ')}
                 </span>
               )}
             </div>
@@ -133,25 +142,29 @@ export function CallStage({
           />
         </div>
 
-        <div className={`px-4 py-4 md:px-5 ${stageHeight}`}>
-          <div className="grid h-full auto-rows-fr gap-3 [grid-template-columns:repeat(auto-fit,minmax(220px,1fr))]">
-            {participants.map((participant) => {
-              const trackRef = trackRefs.find(
-                (candidate) => candidate.participant.identity === participant.identity,
-              ) as TrackReferenceOrPlaceholder | undefined;
-              const user = userMap.get(participant.identity);
-              const displayName = `@${user?.username ?? participant.name ?? user?.name ?? participant.identity}`;
+        <div className="px-4 pb-4 pt-4 md:px-5">
+          <div
+            className={`voice-stage-scroll overflow-y-auto overflow-x-hidden pr-1 ${stageViewportClass}`}
+          >
+            <div className={`grid auto-rows-fr gap-3 ${participantGridClass}`}>
+              {participants.map((participant) => {
+                const trackRef = trackRefs.find(
+                  (candidate) => candidate.participant.identity === participant.identity,
+                ) as TrackReferenceOrPlaceholder | undefined;
+                const user = userMap.get(participant.identity);
+                const displayName = `@${user?.username ?? participant.name ?? user?.name ?? participant.identity}`;
 
-              return (
-                <ParticipantTile
-                  compact={participants.length === 1}
-                  displayName={displayName}
-                  key={participant.identity}
-                  participant={participant}
-                  trackRef={trackRef}
-                />
-              );
-            })}
+                return (
+                  <ParticipantTile
+                    compact={participantCount === 1}
+                    displayName={displayName}
+                    key={participant.identity}
+                    participant={participant}
+                    trackRef={trackRef}
+                  />
+                );
+              })}
+            </div>
           </div>
         </div>
 

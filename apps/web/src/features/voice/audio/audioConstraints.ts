@@ -31,11 +31,11 @@ export const NOISE_SUPPRESSION_LEVELS: Array<{
   label: string;
   value: NoiseSuppressionLevel;
 }> = [
-  { value: 'off', label: 'Off', hint: 'Only browser DSP' },
-  { value: 'low', label: 'Low', hint: 'Soft gate' },
-  { value: 'medium', label: 'Medium', hint: 'Recommended' },
-  { value: 'high', label: 'High', hint: 'Noisy room' },
-  { value: 'max', label: 'Max', hint: 'Can clip voice' },
+  { value: 'off', label: 'Off', hint: 'Без дополнительной обработки.' },
+  { value: 'low', label: 'Low', hint: 'Мягкий gate для тихого фона.' },
+  { value: 'medium', label: 'Medium', hint: 'Рекомендуемый режим для большинства комнат.' },
+  { value: 'high', label: 'High', hint: 'Подходит для шумной комнаты.' },
+  { value: 'max', label: 'Max', hint: 'Максимальное подавление, может срезать голос.' },
 ];
 
 const isBrowser = typeof window !== 'undefined';

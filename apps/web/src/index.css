@@ -41,6 +41,12 @@ input {
   font: inherit;
 }
 
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 button {
   cursor: pointer;
 }
@@ -61,4 +67,23 @@ input::placeholder {
 .lk-control-bar button:hover,
 .lk-button:hover {
   background: color-mix(in srgb, var(--panel-2) 80%, white 20%);
+}
+
+.voice-stage-scroll {
+  scrollbar-gutter: stable;
+}
+
+.audio-settings-panel,
+.audio-settings-panel * {
+  box-sizing: border-box;
+}
+
+.audio-settings-panel select,
+.audio-settings-panel input,
+.audio-settings-panel button {
+  max-width: 100%;
+}
+
+.audio-slider {
+  display: block;
 }

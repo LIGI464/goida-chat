@@ -33,11 +33,11 @@ export function ParticipantTile({
   compact?: boolean | undefined;
 }) {
   const hasCamera = participant.isCameraEnabled && isTrackReference(trackRef);
-  const singleTileClasses = compact ? 'w-full max-w-[420px]' : '';
+  const singleTileClasses = compact ? 'mx-auto w-full max-w-[420px]' : '';
 
   return (
     <article
-      className={`group relative overflow-hidden rounded-3xl border bg-[var(--panel-2)] shadow-[0_20px_50px_rgba(0,0,0,0.22)] transition-all ${
+      className={`group relative h-full overflow-hidden rounded-3xl border bg-[var(--panel-2)] shadow-[0_20px_50px_rgba(0,0,0,0.22)] transition-all ${
         participant.isSpeaking
           ? 'border-[var(--accent)] ring-2 ring-[var(--accent)]/35'
           : 'border-[var(--border)]'
@@ -65,7 +65,7 @@ export function ParticipantTile({
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-white">
               {displayName}
-              {participant.isLocal ? ' · Ты' : ''}
+              {participant.isLocal ? ' / Ты' : ''}
             </p>
             <p className="text-xs text-white/70">
               {participant.isSpeaking ? 'Говорит' : 'В эфире'}
@@ -75,12 +75,12 @@ export function ParticipantTile({
           <div className="flex items-center gap-2">
             {!participant.isMicrophoneEnabled && (
               <span className="rounded-full bg-black/60 px-2 py-1 text-[11px] text-red-200">
-                Mute
+                Микрофон выкл
               </span>
             )}
             {!participant.isCameraEnabled && (
               <span className="rounded-full bg-black/60 px-2 py-1 text-[11px] text-white/80">
-                Cam off
+                Камера выкл
               </span>
             )}
           </div>
