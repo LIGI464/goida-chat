@@ -94,6 +94,20 @@ function profileUsernameError(value: string) {
   return null;
 }
 
+function groupTitleError(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return 'Название комнаты не может быть пустым.';
+  }
+
+  if (normalized.length > 100) {
+    return 'Название комнаты должно быть не длиннее 100 символов.';
+  }
+
+  return null;
+}
+
 function formatChatTime(value?: string | null) {
   if (!value) return '';
 
@@ -468,6 +482,7 @@ function UserSearchResults({
   emptyLabel,
   actionLabel,
   disabledUsername,
+  actionDisabled = false,
   onAction,
 }: {
   users: PublicUser[];
@@ -475,6 +490,7 @@ function UserSearchResults({
   emptyLabel: string;
   actionLabel: string;
   disabledUsername?: string | null;
+  actionDisabled?: boolean;
   onAction: (username: string) => void;
 }) {
   if (isPending) {
@@ -489,7 +505,7 @@ function UserSearchResults({
     <>
       {users.map((user) => {
         const username = user.username ?? '';
-        const disabled = disabledUsername === username;
+        const disabled = actionDisabled || disabledUsername === username;
 
         return (
           <div
@@ -1068,6 +1084,288 @@ function GroupMemberManager({
   );
 }
 
+void GroupMemberManager;
+
+function GroupSettingsModal({
+  chat,
+  open,
+  onClose,
+}: {
+  chat: Chat;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const existingUserIds = new Set(chat.members.map((member) => member.user.id));
+  const [search, setSearch] = useState('');
+  const [title, setTitle] = useState(chat.title ?? '');
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameSuccess, setRenameSuccess] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const normalizedSearch = normalizeUserSearch(search);
+  const normalizedTitle = title.trim();
+
+  const userSearch = useQuery({
+    queryKey: ['group-users', chat.id, normalizedSearch],
+    queryFn: () => api.searchUsers(normalizedSearch),
+    enabled: open && normalizedSearch.length >= 3,
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: (nextTitle: string) => api.renameChat(chat.id, nextTitle),
+    onSuccess: ({ chat: updated }) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, updated) : { chats: [updated] },
+      );
+      setRenameError(null);
+      setRenameSuccess('Название комнаты сохранено.');
+    },
+    onError: (caught) => {
+      setRenameSuccess(null);
+      setRenameError(errorMessage(caught));
+    },
+  });
+
+  const addMemberMutation = useMutation({
+    mutationFn: (username: string) => api.addChatMember(chat.id, username),
+    onSuccess: ({ chat: updated }, username) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, updated) : { chats: [updated] },
+      );
+      queryClient.invalidateQueries({ queryKey: ['voicePresence', chat.id] });
+      setSearch('');
+      setInviteError(null);
+      setInviteSuccess(`@${username} добавлен в комнату.`);
+    },
+    onError: (caught) => {
+      setInviteSuccess(null);
+      setInviteError(errorMessage(caught));
+    },
+  });
+
+  const availableUsers = (userSearch.data?.users ?? []).filter(
+    (user) => !existingUserIds.has(user.id),
+  );
+
+  useEffect(() => {
+    if (!open) return;
+
+    setTitle(chat.title ?? '');
+    setSearch('');
+    setRenameError(null);
+    setRenameSuccess(null);
+    setInviteError(null);
+    setInviteSuccess(null);
+  }, [chat.id, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(chat.title ?? '');
+  }, [chat.title, open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onClose, open]);
+
+  function handleTitleChange(value: string) {
+    setTitle(value);
+    setRenameError(null);
+    setRenameSuccess(null);
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    setInviteError(null);
+    setInviteSuccess(null);
+  }
+
+  async function submitRename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const nextError = groupTitleError(title);
+    if (nextError) {
+      setRenameSuccess(null);
+      setRenameError(nextError);
+      return;
+    }
+
+    if (normalizedTitle === (chat.title ?? '').trim()) {
+      setRenameSuccess(null);
+      setRenameError(null);
+      return;
+    }
+
+    await renameMutation.mutateAsync(normalizedTitle);
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <button
+        aria-label="Закрыть настройки комнаты"
+        className="absolute inset-0 bg-black/60"
+        onClick={onClose}
+        type="button"
+      />
+
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <section
+          aria-modal="true"
+          className="relative flex w-[min(90vw,520px)] min-w-0 flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--panel)] shadow-[0_30px_80px_rgba(0,0,0,0.45)] sm:min-w-[420px]"
+          style={{ maxHeight: '85vh' }}
+          role="dialog"
+        >
+          <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+            <div className="min-w-0">
+              <h2 className="truncate text-lg font-semibold text-[var(--text)]">
+                {chat.title ?? chat.displayTitle ?? 'Комната'}
+              </h2>
+              <p className="text-sm text-[var(--muted)]">
+                Переименование и приглашение участников без перезагрузки.
+              </p>
+            </div>
+            <button
+              className="shrink-0 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--bg)]"
+              onClick={onClose}
+              type="button"
+            >
+              Закрыть
+            </button>
+          </div>
+
+          <div className="min-h-0 overflow-y-auto px-5 py-4">
+            <div className="grid gap-4">
+              <form
+                className="grid gap-3 rounded-3xl border border-[var(--border)] bg-[var(--panel-2)] p-4"
+                onSubmit={(event) => void submitRename(event)}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">Название комнаты</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {chat.members.length} участник(ов)
+                    </p>
+                  </div>
+                  <span className="text-xs text-[var(--muted)]">{normalizedTitle.length}/100</span>
+                </div>
+
+                <input
+                  className="h-10 w-full rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  maxLength={100}
+                  onChange={(event) => handleTitleChange(event.target.value)}
+                  placeholder="Переименовать комнату"
+                  value={title}
+                />
+
+                {(renameError || renameSuccess) && (
+                  <p
+                    className={`text-sm ${renameError ? 'text-[var(--danger)]' : 'text-[var(--success)]'}`}
+                  >
+                    {renameError ?? renameSuccess}
+                  </p>
+                )}
+
+                <button
+                  className="h-10 rounded-2xl bg-[var(--accent)] px-4 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={
+                    renameMutation.isPending ||
+                    Boolean(groupTitleError(title)) ||
+                    normalizedTitle === (chat.title ?? '').trim()
+                  }
+                  type="submit"
+                >
+                  {renameMutation.isPending ? 'Сохраняю...' : 'Сохранить'}
+                </button>
+              </form>
+
+              <section className="grid gap-3 rounded-3xl border border-[var(--border)] bg-[var(--panel-2)] p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">Участники</p>
+                    <p className="text-xs text-[var(--muted)]">Текущий состав комнаты</p>
+                  </div>
+                  <span className="text-xs text-[var(--muted)]">{chat.members.length}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {chat.members.map((member) => (
+                    <span
+                      className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-xs text-[var(--text)]"
+                      key={member.id}
+                    >
+                      @{member.user.username ?? member.user.name}
+                    </span>
+                  ))}
+                </div>
+              </section>
+
+              <section className="grid gap-3 rounded-3xl border border-[var(--border)] bg-[var(--panel-2)] p-4">
+                <div>
+                  <p className="text-sm font-medium text-[var(--text)]">Пригласить по @username</p>
+                  <p className="text-xs text-[var(--muted)]">
+                    Найдём пользователя и сразу добавим в комнату.
+                  </p>
+                </div>
+
+                <input
+                  className="h-10 w-full rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  disabled={addMemberMutation.isPending}
+                  onChange={(event) => handleSearchChange(event.target.value)}
+                  placeholder="Поиск @username"
+                  spellCheck={false}
+                  value={search}
+                />
+
+                {inviteSuccess && <p className="text-sm text-[var(--success)]">{inviteSuccess}</p>}
+
+                {normalizedSearch.length > 0 && normalizedSearch.length < 3 && (
+                  <p className="text-sm text-[var(--muted)]">Введи минимум 3 символа.</p>
+                )}
+
+                {normalizedSearch.length >= 3 && (
+                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-2">
+                    <UserSearchResults
+                      actionLabel={addMemberMutation.isPending ? 'Добавляю...' : 'Добавить'}
+                      disabledUsername={null}
+                      emptyLabel={
+                        userSearch.data?.users?.length
+                          ? 'Все найденные пользователи уже в комнате'
+                          : 'Никого не нашли'
+                      }
+                      isPending={userSearch.isPending}
+                      onAction={(username) => addMemberMutation.mutate(username)}
+                      users={availableUsers}
+                    />
+
+                    {inviteError && <p className="p-2 text-xs text-[var(--danger)]">{inviteError}</p>}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
 function ChatView({
   chat,
   currentUserId,
@@ -1100,13 +1398,6 @@ function ChatView({
     initialPageParam: null as string | null,
     queryFn: ({ pageParam }) => api.getMessages(chat.id, pageParam ?? undefined),
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
-  });
-
-  const renameMutation = useMutation({
-    mutationFn: (title: string) => api.renameChat(chat.id, title),
-    onSuccess: ({ chat: updated }) => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) => upsertChat(old, updated));
-    },
   });
 
   const deleteChatMutation = useMutation({
@@ -1298,19 +1589,6 @@ function ChatView({
         </div>
       )}
 
-      {chat.type === 'group' && roomPanelOpen && (
-        <div className="border-b border-[var(--border)] px-4 py-4 md:px-6">
-          <GroupMemberManager
-            chat={chat}
-            onAdded={() => queryClient.invalidateQueries({ queryKey: ['chats'] })}
-            onClose={() => setRoomPanelOpen(false)}
-            onRename={async (title) => {
-              await renameMutation.mutateAsync(title);
-            }}
-          />
-        </div>
-      )}
-
       <Suspense
         fallback={
           <div className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
@@ -1388,6 +1666,14 @@ function ChatView({
           </button>
         </form>
       </footer>
+
+      {chat.type === 'group' && (
+        <GroupSettingsModal
+          chat={chat}
+          onClose={() => setRoomPanelOpen(false)}
+          open={roomPanelOpen}
+        />
+      )}
     </section>
   );
 }
