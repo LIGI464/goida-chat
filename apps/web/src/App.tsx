@@ -781,7 +781,7 @@ function ChatSidebar({
         />
 
         {normalizedSearch.length >= 3 && (
-          <div className="voice-stage-scroll mt-2 max-h-48 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
+          <div className="app-scrollbar mt-2 max-h-48 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
             <UserSearchResults
               actionLabel="Создать"
               disabledUsername={null}
@@ -839,7 +839,7 @@ function ChatSidebar({
         )}
       </form>
 
-      <div className="voice-stage-scroll mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+      <div className="app-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
         {actionError && (
           <p className="mb-3 rounded-xl border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200">
             {actionError}
@@ -1250,7 +1250,7 @@ function GroupSettingsModal({
             </button>
           </div>
 
-          <div className="min-h-0 overflow-y-auto px-5 py-4">
+          <div className="app-scrollbar min-h-0 overflow-y-auto px-5 py-4">
             <div className="grid gap-4">
               <form
                 className="grid gap-3 rounded-3xl border border-[var(--border)] bg-[var(--panel-2)] p-4"
@@ -1683,7 +1683,7 @@ function ChatView({
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-6">
         <div
-          className="voice-stage-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+          className="app-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
           onScroll={handleMessagesScroll}
           ref={messagesScrollerRef}
         >
