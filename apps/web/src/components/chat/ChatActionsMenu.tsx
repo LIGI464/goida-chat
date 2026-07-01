@@ -8,6 +8,8 @@ type ChatActionItem = {
   disabled?: boolean;
 };
 
+const MENU_BUTTON_LABEL = 'Действия чата';
+
 export function ChatActionsMenu({
   items,
   buttonClassName = '',
@@ -57,15 +59,26 @@ export function ChatActionsMenu({
       <button
         aria-expanded={open}
         aria-haspopup="menu"
+        aria-label={MENU_BUTTON_LABEL}
         className={`grid h-9 w-9 place-items-center rounded-xl border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)] ${buttonClassName}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
           setOpen((value) => !value);
         }}
+        title={MENU_BUTTON_LABEL}
         type="button"
       >
-        в‹Ї
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none h-4 w-4"
+          fill="currentColor"
+          viewBox="0 0 16 16"
+        >
+          <circle cx="3" cy="8" r="1.25" />
+          <circle cx="8" cy="8" r="1.25" />
+          <circle cx="13" cy="8" r="1.25" />
+        </svg>
       </button>
 
       {open && (

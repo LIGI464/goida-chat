@@ -151,6 +151,14 @@ function canDeleteChat(chat: Chat, currentUserId: string) {
   return chat.type === 'group' && chat.createdById === currentUserId;
 }
 
+function unavailableDirectChatAction() {
+  return {
+    label: 'Личный чат нельзя удалить для всех',
+    disabled: true,
+    onSelect: () => {},
+  };
+}
+
 function patchChatsWithMessage(
   data: ChatListData | undefined,
   message: Message,
@@ -851,6 +859,10 @@ function ChatSidebar({
                         deleteChatMutation.mutate(chat.id);
                       },
                     },
+                    {
+                      ...unavailableDirectChatAction(),
+                      hidden: chat.type !== 'direct',
+                    },
                   ]}
                 />
               </div>
@@ -1174,19 +1186,15 @@ function ChatView({
     chat.type === 'group'
       ? [
           {
-            label: '\u041f\u0440\u0438\u0433\u043b\u0430\u0441\u0438\u0442\u044c \u0438\u043b\u0438 \u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u0442\u044c',
+            label: 'Пригласить или переименовать',
             disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
             onSelect: () => setRoomPanelOpen(true),
           },
           {
-            label: '\u0412\u044b\u0439\u0442\u0438 \u0438\u0437 \u043a\u043e\u043c\u043d\u0430\u0442\u044b',
+            label: 'Выйти из комнаты',
             disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
             onSelect: () => {
-              if (
-                !window.confirm(
-                  '\u0412\u044b\u0439\u0442\u0438 \u0438\u0437 \u044d\u0442\u043e\u0439 \u043a\u043e\u043c\u043d\u0430\u0442\u044b?',
-                )
-              ) {
+              if (!window.confirm('Выйти из этой комнаты?')) {
                 return;
               }
 
@@ -1195,14 +1203,14 @@ function ChatView({
             },
           },
           {
-            label: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0447\u0430\u0442',
+            label: 'Удалить чат',
             disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
             hidden: !allowDelete,
             tone: 'danger' as const,
             onSelect: () => {
               if (
                 !window.confirm(
-                  '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043a\u043e\u043c\u043d\u0430\u0442\u0443 \u0434\u043b\u044f \u0432\u0441\u0435\u0445 \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432? \u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u0438 \u0433\u043e\u043b\u043e\u0441\u043e\u0432\u0430\u044f \u043a\u043e\u043c\u043d\u0430\u0442\u0430 \u0442\u043e\u0436\u0435 \u0438\u0441\u0447\u0435\u0437\u043d\u0443\u0442.',
+                  'Удалить комнату для всех участников? Сообщения и голосовая комната тоже исчезнут.',
                 )
               ) {
                 return;
@@ -1213,7 +1221,7 @@ function ChatView({
             },
           },
         ]
-      : [];
+      : [unavailableDirectChatAction()];
 
   return (
     <section className="flex min-h-screen flex-col bg-[var(--bg)]">
