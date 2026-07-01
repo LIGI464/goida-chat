@@ -40,6 +40,7 @@ export async function buildApp() {
 
   await app.register(cors, {
     origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
   await app.register(helmet, {

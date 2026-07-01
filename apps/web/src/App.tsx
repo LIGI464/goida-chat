@@ -1,6 +1,7 @@
 import { signInSchema, signUpSchema } from '@goida-chat/shared';
 import {
   type InfiniteData,
+  type QueryClient,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -69,6 +70,28 @@ function randomRoomTitle() {
 
 function normalizeUserSearch(value: string) {
   return value.trim().toLowerCase().replace(/^@+/, '');
+}
+
+function profileUsernameError(value: string) {
+  const normalized = normalizeUserSearch(value);
+
+  if (!normalized) {
+    return 'Ник не может быть пустым.';
+  }
+
+  if (normalized.length < 3) {
+    return 'Ник должен быть не короче 3 символов.';
+  }
+
+  if (normalized.length > 24) {
+    return 'Ник должен быть не длиннее 24 символов.';
+  }
+
+  if (!/^[a-z0-9_]+$/.test(normalized)) {
+    return 'Используй только строчные латинские буквы, цифры и _.';
+  }
+
+  return null;
 }
 
 function formatChatTime(value?: string | null) {
@@ -202,6 +225,26 @@ function patchMessagesWithUser(
 function patchUsersArray(users: PublicUser[] | undefined, user: PublicUser) {
   if (!users) return users;
   return users.map((item) => (item.id === user.id ? { ...item, ...user } : item));
+}
+
+function patchUserCaches(queryClient: QueryClient, user: PublicUser, currentUserId: string | null) {
+  queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+    patchChatsWithUser(old, user, currentUserId),
+  );
+
+  for (const [queryKey] of queryClient.getQueriesData<MessagesInfinite>({
+    queryKey: ['messages'],
+  })) {
+    queryClient.setQueryData<MessagesInfinite>(queryKey, (old) => patchMessagesWithUser(old, user));
+  }
+
+  for (const [queryKey] of queryClient.getQueriesData<{ users: PublicUser[] }>({
+    queryKey: ['voicePresence'],
+  })) {
+    queryClient.setQueryData<{ users: PublicUser[] }>(queryKey, (old) =>
+      old ? { users: patchUsersArray(old.users, user) ?? [] } : old,
+    );
+  }
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
@@ -411,19 +454,37 @@ function ProfileDialog({
 }: {
   username: string;
   onClose: () => void;
-  onSaved: (username: string) => void;
+  onSaved: (user: PublicUser) => void;
 }) {
   const [nextUsername, setNextUsername] = useState(username);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: api.updateProfile,
     onSuccess: ({ user }) => {
-      onSaved(user.username ?? nextUsername.trim().toLowerCase());
+      setValidationError(null);
+      onSaved(user);
     },
   });
+  const normalizedUsername = normalizeUserSearch(nextUsername);
+  const currentUsername = normalizeUserSearch(username);
+
+  function handleUsernameChange(value: string) {
+    setNextUsername(value.toLowerCase());
+    setValidationError(null);
+    if (mutation.error) mutation.reset();
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    mutation.mutate(nextUsername.trim().toLowerCase());
+
+    const nextError = profileUsernameError(nextUsername);
+    if (nextError) {
+      setValidationError(nextError);
+      return;
+    }
+
+    setValidationError(null);
+    mutation.mutate(normalizedUsername);
   }
 
   return (
@@ -447,23 +508,25 @@ function ProfileDialog({
           <label className="grid gap-2">
             <span className="text-sm text-[var(--muted)]">Ник</span>
             <input
+              autoComplete="username"
               className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              maxLength={24}
-              minLength={3}
-              onChange={(event) => setNextUsername(event.target.value.toLowerCase())}
-              pattern="[a-z0-9_]+"
-              required
+              maxLength={25}
+              onChange={(event) => handleUsernameChange(event.target.value)}
+              placeholder="@username"
+              spellCheck={false}
               value={nextUsername}
             />
           </label>
 
-          {mutation.error && (
-            <p className="text-sm text-[var(--danger)]">{errorMessage(mutation.error)}</p>
+          {(validationError || mutation.error) && (
+            <p className="text-sm text-[var(--danger)]">
+              {validationError ?? errorMessage(mutation.error)}
+            </p>
           )}
 
           <button
             className="h-9 rounded-xl bg-[var(--accent)] px-3 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || normalizedUsername === currentUsername}
           >
             {mutation.isPending ? 'Сохраняю...' : 'Сохранить ник'}
           </button>
@@ -1280,28 +1343,6 @@ function ChatLayout() {
     const nextSocket = createChatSocket();
     setSocket(nextSocket);
 
-    const patchUserEverywhere = (user: PublicUser) => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
-        patchChatsWithUser(old, user, currentUserIdRef.current),
-      );
-
-      for (const [queryKey] of queryClient.getQueriesData<MessagesInfinite>({
-        queryKey: ['messages'],
-      })) {
-        queryClient.setQueryData<MessagesInfinite>(queryKey, (old) =>
-          patchMessagesWithUser(old, user),
-        );
-      }
-
-      for (const [queryKey] of queryClient.getQueriesData<{ users: PublicUser[] }>({
-        queryKey: ['voicePresence'],
-      })) {
-        queryClient.setQueryData<{ users: PublicUser[] }>(queryKey, (old) =>
-          old ? { users: patchUsersArray(old.users, user) ?? [] } : old,
-        );
-      }
-    };
-
     nextSocket.on('message:new', (message) => {
       queryClient.setQueryData<MessagesInfinite>(['messages', message.chatId], (old) =>
         appendMessageToPages(old, message),
@@ -1347,7 +1388,7 @@ function ChatLayout() {
       if (user.id === currentUserIdRef.current) {
         setLocalUsername(user.username ?? user.name);
       }
-      patchUserEverywhere(user);
+      patchUserCaches(queryClient, user, currentUserIdRef.current);
     });
 
     nextSocket.on('message:error', (payload) => {
@@ -1373,12 +1414,14 @@ function ChatLayout() {
     navigate('/login', { replace: true });
   }
 
-  function handleProfileSaved(username: string) {
-    setLocalUsername(username);
+  function handleProfileSaved(user: PublicUser) {
+    setLocalUsername(user.username ?? user.name);
+    patchUserCaches(queryClient, user, currentUserIdRef.current);
     setProfileOpen(false);
     setSocketGeneration((value) => value + 1);
     queryClient.invalidateQueries({ queryKey: ['chats'] });
     queryClient.invalidateQueries({ queryKey: ['users'] });
+    queryClient.invalidateQueries({ queryKey: ['voicePresence'] });
   }
 
   if (!baseUser) return <LoadingScreen />;

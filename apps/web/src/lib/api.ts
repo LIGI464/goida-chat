@@ -1,6 +1,7 @@
 const defaultApiUrl = import.meta.env.DEV ? 'http://localhost:3000' : window.location.origin;
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 
-export const apiUrl = import.meta.env.VITE_API_URL || defaultApiUrl;
+export const apiUrl = (configuredApiUrl || defaultApiUrl).replace(/\/+$/, '');
 
 export type PublicUser = {
   id: string;
@@ -50,18 +51,38 @@ export type VoiceToken = {
 };
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      ...(init?.body ? { 'content-type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        ...(init?.body ? { 'content-type': 'application/json' } : {}),
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error('Не удалось подключиться к API. Проверь адрес сервера и попробуй ещё раз.');
+    }
+
+    throw error;
+  }
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.message ?? payload?.error ?? `Request failed: ${response.status}`);
+    const errorResponse = response.clone();
+    const payload = await errorResponse.json().catch(() => null);
+    const fallbackText = await response
+      .text()
+      .then((value) => value.trim())
+      .catch(() => '');
+    const errorText =
+      payload?.message ??
+      payload?.error ??
+      (fallbackText || `API request failed with status ${response.status}`);
+
+    throw new Error(errorText);
   }
 
   return response.json() as Promise<T>;
