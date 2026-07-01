@@ -1,4 +1,4 @@
-import { DisconnectButton, TrackToggle, useLocalParticipant } from '@livekit/components-react';
+import { TrackToggle, useLocalParticipant } from '@livekit/components-react';
 import { Track } from 'livekit-client';
 
 function tone(active: boolean, danger = false) {
@@ -16,10 +16,12 @@ const controlClassName =
 
 export function CallControls({
   deafened,
+  onLeaveVoice,
   onToggleDeafen,
   onOpenSettings,
 }: {
   deafened: boolean;
+  onLeaveVoice: () => void;
   onToggleDeafen: () => void;
   onOpenSettings: () => void;
 }) {
@@ -57,9 +59,13 @@ export function CallControls({
         Настройки
       </button>
 
-      <DisconnectButton className={`${controlClassName} ${tone(false, true)}`}>
+      <button
+        className={`${controlClassName} ${tone(false, true)}`}
+        onClick={onLeaveVoice}
+        type="button"
+      >
         Выйти
-      </DisconnectButton>
+      </button>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { LiveKitRoom } from '@livekit/components-react';
 import { signInSchema, signUpSchema } from '@goida-chat/shared';
 import {
   type InfiniteData,
@@ -9,7 +10,6 @@ import {
 } from '@tanstack/react-query';
 import {
   Suspense,
-  lazy,
   type FormEvent,
   type ReactNode,
   useEffect,
@@ -21,13 +21,18 @@ import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-r
 import { z } from 'zod';
 
 import { ChatActionsMenu, type ChatActionItem } from './components/chat/ChatActionsMenu';
-import { api, type Chat, type Message, type PublicUser } from './lib/api';
+import { ConnectedVoiceRuntime, VoicePanel } from './components/voice/VoicePanel';
+import {
+  buildAudioCaptureOptions,
+  readVoiceCapturePreferences,
+  writeVoiceCapturePreferences,
+  type NoiseSuppressionLevel,
+  type VoiceCapturePreferences,
+} from './features/voice/audio/audioConstraints';
+import { useAudioDevices } from './features/voice/audio/useAudioDevices';
+import { api, type Chat, type Message, type PublicUser, type VoiceToken } from './lib/api';
 import { authClient } from './lib/auth-client';
 import { createChatSocket, type ChatSocket } from './lib/socket';
-
-const VoicePanel = lazy(() =>
-  import('./components/voice/VoicePanel').then((module) => ({ default: module.VoicePanel })),
-);
 
 const TERRARIA_ROOM_NAMES = [
   'Amber Hollow',
@@ -55,6 +60,7 @@ type MessagesPage = { messages: Message[]; nextCursor: string | null };
 type MessagesInfinite = InfiniteData<MessagesPage, string | null>;
 type ChatListData = { chats: Chat[] };
 type CurrentUser = { id: string; name: string; username?: string | null };
+type VoiceDisconnectAction = 'leave' | 'removed' | 'switch';
 
 function errorMessage(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -1377,6 +1383,7 @@ function ChatView({
   roomPanelRequestVersion,
   onBack,
   onOpenSidebar,
+  voicePanel,
 }: {
   chat: Chat;
   currentUserId: string;
@@ -1386,6 +1393,7 @@ function ChatView({
   roomPanelRequestVersion: number;
   onBack: () => void;
   onOpenSidebar: () => void;
+  voicePanel: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const [text, setText] = useState('');
@@ -1677,7 +1685,7 @@ function ChatView({
             </div>
           }
         >
-          <VoicePanel chat={chat} socket={socket} />
+          {voicePanel}
         </Suspense>
       </div>
 
@@ -1787,6 +1795,48 @@ function ChatLayout() {
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
     [chats, selectedChatId],
   );
+  const [activeVoiceChatId, setActiveVoiceChatId] = useState<string | null>(null);
+  const [voiceSession, setVoiceSession] = useState<VoiceToken | null>(null);
+  const [voiceConnectEnabled, setVoiceConnectEnabled] = useState(false);
+  const [voiceJoinPendingChatId, setVoiceJoinPendingChatId] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceDeafened, setVoiceDeafened] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [voiceRemoteParticipantVolumes, setVoiceRemoteParticipantVolumes] = useState<
+    Record<string, number>
+  >({});
+  const [voiceCapturePreferences, setVoiceCapturePreferences] = useState<
+    Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>
+  >(() => {
+    const prefs = readVoiceCapturePreferences();
+    return {
+      autoGainControl: prefs.autoGainControl,
+      echoCancellation: prefs.echoCancellation,
+      noiseSuppression: prefs.noiseSuppression,
+    };
+  });
+  const [noiseSuppressionLevel, setNoiseSuppressionLevel] = useState<NoiseSuppressionLevel>(
+    () => readVoiceCapturePreferences().noiseSuppressionLevel,
+  );
+  const { activeDeviceId, devices, setMicDeviceId } = useAudioDevices();
+  const activeVoiceChatIdRef = useRef<string | null>(null);
+  const voicePresenceChatIdRef = useRef<string | null>(null);
+  const voiceDisconnectActionRef = useRef<VoiceDisconnectAction | null>(null);
+  const pendingVoiceSwitchChatRef = useRef<Chat | null>(null);
+  const activeVoiceChat = useMemo(
+    () => chats.find((chat) => chat.id === activeVoiceChatId) ?? null,
+    [activeVoiceChatId, chats],
+  );
+  const voiceCaptureOptions = useMemo<VoiceCapturePreferences>(
+    () => ({
+      autoGainControl: voiceCapturePreferences.autoGainControl,
+      echoCancellation: voiceCapturePreferences.echoCancellation,
+      micDeviceId: activeDeviceId,
+      noiseSuppression: voiceCapturePreferences.noiseSuppression,
+      noiseSuppressionLevel,
+    }),
+    [activeDeviceId, noiseSuppressionLevel, voiceCapturePreferences],
+  );
 
   useEffect(() => {
     setLocalUsername(baseUser?.username ?? null);
@@ -1796,6 +1846,30 @@ function ChatLayout() {
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId;
   }, [selectedChatId]);
+
+  useEffect(() => {
+    activeVoiceChatIdRef.current = activeVoiceChatId;
+  }, [activeVoiceChatId]);
+
+  useEffect(() => {
+    writeVoiceCapturePreferences(
+      {
+        autoGainControl: voiceCapturePreferences.autoGainControl,
+        echoCancellation: voiceCapturePreferences.echoCancellation,
+        noiseSuppression: voiceCapturePreferences.noiseSuppression,
+      },
+      readVoiceCapturePreferences(),
+    );
+  }, [voiceCapturePreferences]);
+
+  useEffect(() => {
+    writeVoiceCapturePreferences({ noiseSuppressionLevel }, readVoiceCapturePreferences());
+  }, [noiseSuppressionLevel]);
+
+  useEffect(() => {
+    setVoiceSettingsOpen(false);
+    setVoiceRemoteParticipantVolumes({});
+  }, [activeVoiceChatId]);
 
   useEffect(() => {
     if (selectedChatId) setSidebarOpen(false);
@@ -1812,6 +1886,26 @@ function ChatLayout() {
       setSelectedChatId(chats[0]?.id ?? null);
     }
   }, [chats, selectedChatId]);
+
+  useEffect(() => {
+    if (!activeVoiceChatId) return;
+    if (chats.some((chat) => chat.id === activeVoiceChatId)) return;
+
+    pendingVoiceSwitchChatRef.current = null;
+    voiceDisconnectActionRef.current = 'removed';
+    setVoiceConnectEnabled(false);
+
+    if (!voiceSession) {
+      if (voicePresenceChatIdRef.current) {
+        socket?.emit('voice:left', { chatId: voicePresenceChatIdRef.current });
+        voicePresenceChatIdRef.current = null;
+      }
+      voiceDisconnectActionRef.current = null;
+      setActiveVoiceChatId(null);
+      setVoiceSession(null);
+      setVoiceJoinPendingChatId(null);
+    }
+  }, [activeVoiceChatId, chats, socket, voiceSession]);
 
   useEffect(() => {
     const nextSocket = createChatSocket();
@@ -1856,6 +1950,10 @@ function ChatLayout() {
       queryClient.invalidateQueries({ queryKey: ['voicePresence', chatId] });
     });
 
+    nextSocket.on('voice:presence:update', ({ chatId, users }) => {
+      queryClient.setQueryData(['voicePresence', chatId], { users });
+    });
+
     nextSocket.on('user:updated', ({ user }) => {
       if (user.id === currentUserIdRef.current) {
         setLocalUsername(user.username ?? user.name);
@@ -1881,6 +1979,97 @@ function ChatLayout() {
     };
   }, [selectedChatId, socket]);
 
+  useEffect(() => {
+    const chatId = voicePresenceChatIdRef.current;
+    if (!socket || !chatId) return;
+
+    socket.emit('voice:join', { chatId });
+  }, [socket]);
+
+  async function startVoiceJoin(chat: Chat) {
+    setVoiceJoinPendingChatId(chat.id);
+    setVoiceError(null);
+
+    try {
+      const token = await api.getVoiceToken(chat.id);
+      setActiveVoiceChatId(chat.id);
+      setVoiceSession(token);
+      setVoiceConnectEnabled(true);
+    } catch (caught) {
+      setVoiceError(errorMessage(caught));
+    } finally {
+      setVoiceJoinPendingChatId(null);
+    }
+  }
+
+  function clearVoicePresence() {
+    const chatId = voicePresenceChatIdRef.current;
+    if (!chatId) return;
+
+    socket?.emit('voice:left', { chatId });
+    voicePresenceChatIdRef.current = null;
+  }
+
+  function finalizeVoiceDisconnect(action: VoiceDisconnectAction | null) {
+    clearVoicePresence();
+    setVoiceConnectEnabled(false);
+    setVoiceSession(null);
+    setActiveVoiceChatId(null);
+    setVoiceJoinPendingChatId(null);
+
+    const nextChat = action === 'switch' ? pendingVoiceSwitchChatRef.current : null;
+    pendingVoiceSwitchChatRef.current = null;
+    voiceDisconnectActionRef.current = null;
+
+    if (!action) {
+      setVoiceError((current) => current ?? 'Звонок завершился из-за ошибки подключения.');
+    }
+
+    if (nextChat) {
+      void startVoiceJoin(nextChat);
+    }
+  }
+
+  function leaveVoiceChat() {
+    if (!voiceSession && !activeVoiceChatId) return;
+
+    pendingVoiceSwitchChatRef.current = null;
+    voiceDisconnectActionRef.current = 'leave';
+    setVoiceConnectEnabled(false);
+
+    if (!voiceSession) {
+      finalizeVoiceDisconnect('leave');
+    }
+  }
+
+  function joinVoiceChat(chat: Chat) {
+    if (voiceJoinPendingChatId) return;
+
+    const currentVoiceChatId = activeVoiceChatIdRef.current;
+    if (currentVoiceChatId === chat.id && (voiceSession || voiceConnectEnabled)) {
+      setVoiceError(null);
+      setSelectedChatId(chat.id);
+      return;
+    }
+
+    if (currentVoiceChatId && currentVoiceChatId !== chat.id && (voiceSession || voiceConnectEnabled)) {
+      const confirmed = window.confirm('Вы уже в другом звонке. Перейти?');
+      if (!confirmed) return;
+
+      setVoiceJoinPendingChatId(chat.id);
+      pendingVoiceSwitchChatRef.current = chat;
+      voiceDisconnectActionRef.current = 'switch';
+      setVoiceConnectEnabled(false);
+
+      if (!voiceSession) {
+        finalizeVoiceDisconnect('switch');
+      }
+      return;
+    }
+
+    void startVoiceJoin(chat);
+  }
+
   async function signOut() {
     await authClient.signOut();
     navigate('/login', { replace: true });
@@ -1902,12 +2091,131 @@ function ChatLayout() {
     setRoomPanelRequestVersion((value) => value + 1);
   }
 
+  function handleVoiceConnected() {
+    const chatId = activeVoiceChatIdRef.current;
+    if (!chatId) return;
+
+    setVoiceError(null);
+
+    if (voicePresenceChatIdRef.current === chatId) {
+      return;
+    }
+
+    socket?.emit('voice:join', { chatId });
+    voicePresenceChatIdRef.current = chatId;
+  }
+
+  function handleVoiceDisconnected() {
+    finalizeVoiceDisconnect(voiceDisconnectActionRef.current);
+  }
+
   if (!baseUser) return <LoadingScreen />;
 
   const currentUser: CurrentUser = {
     ...baseUser,
     username: localUsername ?? baseUser.username ?? baseUser.name,
   };
+  const voicePanel = selectedChat ? (
+    <VoicePanel
+      activeDeviceId={activeDeviceId}
+      activeVoiceChat={activeVoiceChat}
+      capturePreferences={voiceCapturePreferences}
+      chat={selectedChat}
+      deafened={voiceDeafened}
+      devices={devices}
+      error={voiceError}
+      hasActiveVoiceSession={!!voiceSession && !!activeVoiceChatId}
+      isVoiceJoinPending={voiceJoinPendingChatId === selectedChat.id}
+      noiseSuppressionLevel={noiseSuppressionLevel}
+      onCloseSettings={() => setVoiceSettingsOpen(false)}
+      onJoinVoice={joinVoiceChat}
+      onLeaveVoice={leaveVoiceChat}
+      onOpenSettings={() => setVoiceSettingsOpen(true)}
+      onRemoteParticipantVolumeChange={(identity, nextValue) => {
+        setVoiceRemoteParticipantVolumes((current) => ({ ...current, [identity]: nextValue }));
+      }}
+      onReturnToVoice={() => {
+        if (activeVoiceChatId) {
+          setSelectedChatId(activeVoiceChatId);
+        }
+      }}
+      onToggleDeafen={() => setVoiceDeafened((value) => !value)}
+      remoteParticipantVolumes={voiceRemoteParticipantVolumes}
+      setCapturePreferences={setVoiceCapturePreferences}
+      setMicDeviceId={setMicDeviceId}
+      setNoiseSuppressionLevel={setNoiseSuppressionLevel}
+      settingsOpen={voiceSettingsOpen}
+    />
+  ) : null;
+  const rightPaneContent = selectedChat ? (
+    <ChatView
+      chat={selectedChat}
+      currentUserId={currentUser.id}
+      onConsumeRoomPanelRequest={() => setRoomPanelRequestChatId(null)}
+      onBack={() => setSelectedChatId(null)}
+      onOpenSidebar={() => setSidebarOpen(true)}
+      roomPanelRequestChatId={roomPanelRequestChatId}
+      roomPanelRequestVersion={roomPanelRequestVersion}
+      socket={socket}
+      voicePanel={voicePanel}
+    />
+  ) : (
+    <section className="grid h-full min-h-0 place-items-center overflow-hidden px-4 text-center">
+      <div className="grid gap-3">
+        <p className="text-sm text-[var(--muted)]">
+          {activeVoiceChat
+            ? `Звонок в ${activeVoiceChat.displayTitle ?? activeVoiceChat.title ?? 'комнате'} всё ещё активен.`
+            : 'Выбери чат или создай новый.'}
+        </p>
+        {activeVoiceChat && (
+          <button
+            className="h-10 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)]"
+            onClick={() => setSelectedChatId(activeVoiceChat.id)}
+            type="button"
+          >
+            К войсу
+          </button>
+        )}
+        <button
+          className="h-10 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 text-sm text-[var(--text)] md:hidden"
+          onClick={() => setSidebarOpen(true)}
+          type="button"
+        >
+          Открыть список чатов
+        </button>
+      </div>
+    </section>
+  );
+  const rightPane = voiceSession && activeVoiceChatId ? (
+    <LiveKitRoom
+      audio={buildAudioCaptureOptions(voiceCaptureOptions)}
+      connect={voiceConnectEnabled}
+      connectOptions={{ autoSubscribe: true, maxRetries: 12 }}
+      onConnected={handleVoiceConnected}
+      onDisconnected={handleVoiceDisconnected}
+      onError={(nextError) => setVoiceError(nextError.message)}
+      options={{
+        adaptiveStream: true,
+        audioCaptureDefaults: buildAudioCaptureOptions(voiceCaptureOptions),
+        dynacast: true,
+        stopLocalTrackOnUnpublish: false,
+      }}
+      serverUrl={voiceSession.url}
+      token={voiceSession.token}
+      video={false}
+    >
+      <ConnectedVoiceRuntime
+        activeDeviceId={activeDeviceId}
+        capturePreferences={voiceCapturePreferences}
+        deafened={voiceDeafened}
+        noiseSuppressionLevel={noiseSuppressionLevel}
+        onError={setVoiceError}
+      />
+      {rightPaneContent}
+    </LiveKitRoom>
+  ) : (
+    rightPaneContent
+  );
 
   return (
     <>
@@ -1925,33 +2233,7 @@ function ChatLayout() {
           />
         </div>
 
-        <div className="min-h-0 min-w-0 overflow-hidden">
-          {selectedChat ? (
-            <ChatView
-              chat={selectedChat}
-              currentUserId={currentUser.id}
-              onConsumeRoomPanelRequest={() => setRoomPanelRequestChatId(null)}
-              onBack={() => setSelectedChatId(null)}
-              onOpenSidebar={() => setSidebarOpen(true)}
-              roomPanelRequestChatId={roomPanelRequestChatId}
-              roomPanelRequestVersion={roomPanelRequestVersion}
-              socket={socket}
-            />
-          ) : (
-            <section className="grid h-full min-h-0 place-items-center overflow-hidden px-4 text-center">
-              <div className="grid gap-3">
-                <p className="text-sm text-[var(--muted)]">Выбери чат или создай новый.</p>
-                <button
-                  className="h-10 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 text-sm text-[var(--text)] md:hidden"
-                  onClick={() => setSidebarOpen(true)}
-                  type="button"
-                >
-                  Открыть список чатов
-                </button>
-              </div>
-            </section>
-          )}
-        </div>
+        <div className="min-h-0 min-w-0 overflow-hidden">{rightPane}</div>
       </main>
 
       {sidebarOpen && (

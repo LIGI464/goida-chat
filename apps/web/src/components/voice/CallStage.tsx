@@ -7,13 +7,13 @@ import {
 } from '@livekit/components-react';
 import type { TrackReferenceOrPlaceholder } from '@livekit/components-core';
 import { ConnectionState, Track } from 'livekit-client';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 
+import { useAudioLevelMeter } from '../../features/voice/audio/useAudioLevelMeter';
 import type {
   NoiseSuppressionLevel,
   VoiceCapturePreferences,
 } from '../../features/voice/audio/audioConstraints';
-import { useAudioLevelMeter } from '../../features/voice/audio/useAudioLevelMeter';
 import type { Chat, PublicUser } from '../../lib/api';
 import { AudioSettingsDrawer } from './AudioSettingsDrawer';
 import { CallControls } from './CallControls';
@@ -36,6 +36,10 @@ export function CallStage({
   users,
   deafened,
   onToggleDeafen,
+  onLeaveVoice,
+  onOpenSettings,
+  onCloseSettings,
+  settingsOpen,
   activeDeviceId,
   devices,
   capturePreferences,
@@ -43,11 +47,17 @@ export function CallStage({
   setMicDeviceId,
   noiseSuppressionLevel,
   setNoiseSuppressionLevel,
+  remoteParticipantVolumes,
+  onRemoteParticipantVolumeChange,
 }: {
   chat: Chat;
   users: PublicUser[];
   deafened: boolean;
   onToggleDeafen: () => void;
+  onLeaveVoice: () => void;
+  onOpenSettings: () => void;
+  onCloseSettings: () => void;
+  settingsOpen: boolean;
   activeDeviceId: string;
   devices: MediaDeviceInfo[];
   capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
@@ -57,8 +67,9 @@ export function CallStage({
   setMicDeviceId: (next: string) => void;
   noiseSuppressionLevel: NoiseSuppressionLevel;
   setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
+  remoteParticipantVolumes: Record<string, number>;
+  onRemoteParticipantVolumeChange: (identity: string, nextValue: number) => void;
 }) {
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const connectionState = useConnectionState();
   const participants = useParticipants();
   const remoteParticipants = useRemoteParticipants();
@@ -67,23 +78,13 @@ export function CallStage({
   const meterTrack = microphoneTrack?.audioTrack?.mediaStreamTrack;
   const meter = useAudioLevelMeter(meterTrack, noiseSuppressionLevel);
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
-  const [volumes, setVolumes] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    setSettingsOpen(false);
-  }, [chat.id]);
-
-  useEffect(() => {
-    setVolumes((current) => {
-      const next: Record<string, number> = {};
-
-      for (const participant of remoteParticipants) {
-        next[participant.identity] = current[participant.identity] ?? 100;
-      }
-
-      return next;
-    });
-  }, [remoteParticipants]);
+    for (const participant of remoteParticipants) {
+      const nextVolume = remoteParticipantVolumes[participant.identity];
+      participant.setVolume((nextVolume ?? 100) / 100);
+    }
+  }, [remoteParticipantVolumes, remoteParticipants]);
 
   const hasCamera = participants.some((participant) => participant.isCameraEnabled);
   const participantCount = participants.length;
@@ -103,7 +104,7 @@ export function CallStage({
   const remoteVolumes = remoteParticipants.map((participant) => ({
     identity: participant.identity,
     label: `@${userMap.get(participant.identity)?.username ?? participant.name ?? participant.identity}`,
-    value: volumes[participant.identity] ?? 100,
+    value: remoteParticipantVolumes[participant.identity] ?? 100,
   }));
 
   return (
@@ -137,7 +138,8 @@ export function CallStage({
 
           <CallControls
             deafened={deafened}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onLeaveVoice={onLeaveVoice}
+            onOpenSettings={onOpenSettings}
             onToggleDeafen={onToggleDeafen}
           />
         </div>
@@ -175,12 +177,8 @@ export function CallStage({
           micLevel={meter.level}
           micSpeaking={meter.speaking}
           noiseSuppressionLevel={noiseSuppressionLevel}
-          onClose={() => setSettingsOpen(false)}
-          onRemoteVolumeChange={(identity, nextValue) => {
-            setVolumes((current) => ({ ...current, [identity]: nextValue }));
-            const participant = remoteParticipants.find((item) => item.identity === identity);
-            participant?.setVolume(nextValue / 100);
-          }}
+          onClose={onCloseSettings}
+          onRemoteVolumeChange={onRemoteParticipantVolumeChange}
           open={settingsOpen}
           remoteVolumes={remoteVolumes}
           setCapturePreferences={setCapturePreferences}
