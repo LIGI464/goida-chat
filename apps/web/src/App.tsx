@@ -750,7 +750,7 @@ function ChatSidebar({
   }, [queryClient, socket]);
 
   return (
-    <aside className="flex min-h-screen flex-col border-r border-[var(--border)] bg-[var(--panel)] p-4">
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--panel)] p-4">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <p className="text-sm text-[var(--muted)]">Чаты</p>
@@ -765,7 +765,7 @@ function ChatSidebar({
         </button>
       </div>
 
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+      <div className="shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
         <div className="mb-2 flex items-center justify-between gap-3">
           <p className="text-sm text-[var(--muted)]">Поиск @username</p>
           <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--muted)]">
@@ -781,7 +781,7 @@ function ChatSidebar({
         />
 
         {normalizedSearch.length >= 3 && (
-          <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
+          <div className="voice-stage-scroll mt-2 max-h-48 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
             <UserSearchResults
               actionLabel="Создать"
               disabledUsername={null}
@@ -800,7 +800,7 @@ function ChatSidebar({
       </div>
 
       <form
-        className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3"
+        className="mt-3 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3"
         onSubmit={createGroup}
       >
         <div className="mb-2 flex items-center justify-between gap-2">
@@ -839,7 +839,7 @@ function ChatSidebar({
         )}
       </form>
 
-      <div className="mt-3 min-h-0 flex-1 overflow-auto pr-1">
+      <div className="voice-stage-scroll mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
         {actionError && (
           <p className="mb-3 rounded-xl border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200">
             {actionError}
@@ -923,7 +923,7 @@ function ChatSidebar({
         })}
       </div>
 
-      <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+      <div className="mt-3 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
         <p className="text-sm text-[var(--muted)]">Профиль</p>
         <button
           className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-[var(--panel)]"
@@ -1354,7 +1354,9 @@ function GroupSettingsModal({
                       users={availableUsers}
                     />
 
-                    {inviteError && <p className="p-2 text-xs text-[var(--danger)]">{inviteError}</p>}
+                    {inviteError && (
+                      <p className="p-2 text-xs text-[var(--danger)]">{inviteError}</p>
+                    )}
                   </div>
                 )}
               </section>
@@ -1391,6 +1393,13 @@ function ChatView({
   const [actionError, setActionError] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+  const messagesScrollerRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+  const pendingHistoryRestoreRef = useRef<{
+    pageCount: number;
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
   const allowDelete = canDeleteChat(chat, currentUserId);
 
   const messagesQuery = useInfiniteQuery({
@@ -1504,6 +1513,11 @@ function ChatView({
   }, [chat.id]);
 
   useEffect(() => {
+    stickToBottomRef.current = true;
+    pendingHistoryRestoreRef.current = null;
+  }, [chat.id]);
+
+  useEffect(() => {
     if (roomPanelRequestChatId !== chat.id) return;
     setRoomPanelOpen(true);
     onConsumeRoomPanelRequest();
@@ -1514,12 +1528,50 @@ function ChatView({
       .slice()
       .reverse()
       .flatMap((page) => page.messages) ?? [];
+  const pageCount = messagesQuery.data?.pages.length ?? 0;
   const nextCursor =
     messagesQuery.data?.pages[messagesQuery.data.pages.length - 1]?.nextCursor ?? null;
+  const latestMessageId = messages[messages.length - 1]?.id ?? null;
   const typingUsers = chat.members
     .map((member) => member.user)
     .filter((user) => typingUserIds.includes(user.id) && user.id !== currentUserId)
     .map((user) => `@${user.username ?? user.name}`);
+
+  useEffect(() => {
+    const pendingRestore = pendingHistoryRestoreRef.current;
+    const scroller = messagesScrollerRef.current;
+
+    if (!pendingRestore || !scroller || messagesQuery.isFetchingNextPage) return;
+
+    if (pageCount > pendingRestore.pageCount) {
+      scroller.scrollTop =
+        pendingRestore.scrollTop + (scroller.scrollHeight - pendingRestore.scrollHeight);
+    }
+
+    pendingHistoryRestoreRef.current = null;
+  }, [messagesQuery.isFetchingNextPage, pageCount]);
+
+  useEffect(() => {
+    const scroller = messagesScrollerRef.current;
+    if (!scroller || pendingHistoryRestoreRef.current || !stickToBottomRef.current) return;
+    scroller.scrollTop = scroller.scrollHeight;
+  }, [chat.id, latestMessageId]);
+
+  useEffect(() => {
+    const scroller = messagesScrollerRef.current;
+    if (!scroller || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      if (!stickToBottomRef.current || pendingHistoryRestoreRef.current) return;
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+
+    observer.observe(scroller);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   const actionPending = leaveChatMutation.isPending || deleteChatMutation.isPending;
   const chatActions =
@@ -1542,8 +1594,36 @@ function ChatView({
         })
       : [unavailableDirectChatAction()];
 
+  async function loadOlderMessages() {
+    const scroller = messagesScrollerRef.current;
+
+    if (scroller) {
+      pendingHistoryRestoreRef.current = {
+        pageCount,
+        scrollHeight: scroller.scrollHeight,
+        scrollTop: scroller.scrollTop,
+      };
+      stickToBottomRef.current = false;
+    }
+
+    try {
+      await messagesQuery.fetchNextPage();
+    } catch (caught) {
+      pendingHistoryRestoreRef.current = null;
+      throw caught;
+    }
+  }
+
+  function handleMessagesScroll() {
+    const scroller = messagesScrollerRef.current;
+    if (!scroller) return;
+
+    const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    stickToBottomRef.current = distanceFromBottom <= 48;
+  }
+
   return (
-    <section className="flex min-h-screen flex-col bg-[var(--bg)]">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg)]">
       <header className="flex min-h-[72px] shrink-0 items-center justify-between border-b border-[var(--border)] px-4 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <button
@@ -1589,61 +1669,69 @@ function ChatView({
         </div>
       )}
 
-      <Suspense
-        fallback={
-          <div className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
-            Голос...
-          </div>
-        }
-      >
-        <VoicePanel chat={chat} socket={socket} />
-      </Suspense>
+      <div className="shrink-0">
+        <Suspense
+          fallback={
+            <div className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
+              Голос...
+            </div>
+          }
+        >
+          <VoicePanel chat={chat} socket={socket} />
+        </Suspense>
+      </div>
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-6">
-        {messagesQuery.isPending && (
-          <p className="text-sm text-[var(--muted)]">Гружу сообщения...</p>
-        )}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-6">
+        <div
+          className="voice-stage-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+          onScroll={handleMessagesScroll}
+          ref={messagesScrollerRef}
+        >
+          {messagesQuery.isPending && (
+            <p className="text-sm text-[var(--muted)]">Гружу сообщения...</p>
+          )}
 
-        {messages.length === 0 && !messagesQuery.isPending && (
-          <p className="text-center text-sm text-[var(--muted)]">Пока пусто. Напиши первым.</p>
-        )}
+          {messages.length === 0 && !messagesQuery.isPending && (
+            <p className="text-center text-sm text-[var(--muted)]">Пока пусто. Напиши первым.</p>
+          )}
 
-        {nextCursor && (
-          <div className="mb-3 flex justify-center">
-            <button
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-xs text-[var(--text)]"
-              onClick={() => messagesQuery.fetchNextPage()}
-              type="button"
-            >
-              Показать старые
-            </button>
-          </div>
-        )}
+          {nextCursor && (
+            <div className="mb-3 flex justify-center">
+              <button
+                className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-xs text-[var(--text)]"
+                onClick={() => void loadOlderMessages()}
+                type="button"
+              >
+                Показать старые
+              </button>
+            </div>
+          )}
 
-        <div className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
-          {messages.map((message) => {
-            const own = message.userId === currentUserId;
+          <div className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
+            {messages.map((message) => {
+              const own = message.userId === currentUserId;
 
-            return (
-              <div className="px-4 py-3" key={message.id}>
-                <div className="mb-1 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span
-                      className={`text-sm font-medium ${own ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}
-                    >
-                      {own ? 'Ты' : `@${message.user.username ?? message.user.name}`}
+              return (
+                <div className="px-4 py-3" key={message.id}>
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span
+                        className={`text-sm font-medium ${own ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}
+                      >
+                        {own ? 'Ты' : `@${message.user.username ?? message.user.name}`}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-xs text-[var(--muted)]">
+                      {formatChatTime(message.createdAt)}
                     </span>
                   </div>
-                  <span className="shrink-0 text-xs text-[var(--muted)]">
-                    {formatChatTime(message.createdAt)}
-                  </span>
+                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-[var(--text)]">
+                    {message.text}
+                  </p>
                 </div>
-                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-[var(--text)]">
-                  {message.text}
-                </p>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -1823,8 +1911,8 @@ function ChatLayout() {
 
   return (
     <>
-      <main className="grid min-h-screen grid-cols-1 bg-[var(--bg)] md:grid-cols-[320px_1fr]">
-        <div className="hidden md:block">
+      <main className="grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[var(--bg)] md:grid-cols-[320px_1fr]">
+        <div className="hidden min-h-0 overflow-hidden md:block">
           <ChatSidebar
             chats={chats}
             currentUser={currentUser}
@@ -1837,7 +1925,7 @@ function ChatLayout() {
           />
         </div>
 
-        <div className="min-w-0">
+        <div className="min-h-0 min-w-0 overflow-hidden">
           {selectedChat ? (
             <ChatView
               chat={selectedChat}
@@ -1850,7 +1938,7 @@ function ChatLayout() {
               socket={socket}
             />
           ) : (
-            <section className="grid min-h-screen place-items-center px-4 text-center">
+            <section className="grid h-full min-h-0 place-items-center overflow-hidden px-4 text-center">
               <div className="grid gap-3">
                 <p className="text-sm text-[var(--muted)]">Выбери чат или создай новый.</p>
                 <button
@@ -1867,14 +1955,14 @@ function ChatLayout() {
       </main>
 
       {sidebarOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
+        <div className="fixed inset-0 z-40 overflow-hidden md:hidden">
           <button
             aria-label="Закрыть список чатов"
             className="absolute inset-0 bg-black/60"
             onClick={() => setSidebarOpen(false)}
             type="button"
           />
-          <div className="absolute inset-y-0 left-0 w-[min(88vw,320px)]">
+          <div className="absolute inset-y-0 left-0 h-full w-[min(88vw,320px)] overflow-hidden">
             <ChatSidebar
               chats={chats}
               currentUser={currentUser}

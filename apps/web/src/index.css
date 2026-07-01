@@ -23,17 +23,31 @@
 }
 
 html {
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(109, 93, 252, 0.18), transparent 28%),
     radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 22%), var(--bg);
 }
 
 body {
-  min-width: 320px;
+  height: 100%;
   min-height: 100vh;
+  min-height: 100dvh;
+  min-width: 320px;
   margin: 0;
+  overflow: hidden;
   color: var(--text);
   background: transparent;
+}
+
+#root {
+  height: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow: hidden;
 }
 
 button,
