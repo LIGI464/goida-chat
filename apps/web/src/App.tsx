@@ -20,7 +20,7 @@ import {
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 
-import { ChatActionsMenu } from './components/chat/ChatActionsMenu';
+import { ChatActionsMenu, type ChatActionItem } from './components/chat/ChatActionsMenu';
 import { api, type Chat, type Message, type PublicUser } from './lib/api';
 import { authClient } from './lib/auth-client';
 import { createChatSocket, type ChatSocket } from './lib/socket';
@@ -151,12 +151,62 @@ function canDeleteChat(chat: Chat, currentUserId: string) {
   return chat.type === 'group' && chat.createdById === currentUserId;
 }
 
-function unavailableDirectChatAction() {
+function unavailableDirectChatAction(): ChatActionItem {
   return {
     label: 'Личный чат нельзя удалить для всех',
     disabled: true,
     onSelect: () => {},
   };
+}
+
+function buildGroupChatActionItems({
+  allowDelete,
+  disabled,
+  onDelete,
+  onLeave,
+  onManage,
+}: {
+  allowDelete: boolean;
+  disabled: boolean;
+  onDelete: () => void;
+  onLeave: () => void;
+  onManage: () => void;
+}): ChatActionItem[] {
+  return [
+    {
+      label: 'Пригласить или переименовать',
+      disabled,
+      onSelect: onManage,
+    },
+    {
+      label: 'Выйти из комнаты',
+      disabled,
+      onSelect: () => {
+        if (!window.confirm('Выйти из этой комнаты?')) {
+          return;
+        }
+
+        onLeave();
+      },
+    },
+    {
+      label: 'Удалить чат',
+      disabled,
+      hidden: !allowDelete,
+      tone: 'danger',
+      onSelect: () => {
+        if (
+          !window.confirm(
+            'Удалить чат для всех участников? Сообщения и голосовая комната тоже исчезнут.',
+          )
+        ) {
+          return;
+        }
+
+        onDelete();
+      },
+    },
+  ];
 }
 
 function patchChatsWithMessage(
@@ -559,6 +609,7 @@ function ChatSidebar({
   currentUser,
   selectedChatId,
   socket,
+  onOpenGroupManager,
   onOpenProfile,
   onSelect,
   onSignOut,
@@ -567,6 +618,7 @@ function ChatSidebar({
   currentUser: CurrentUser;
   selectedChatId: string | null;
   socket: ChatSocket | null;
+  onOpenGroupManager: (chatId: string) => void;
   onOpenProfile: () => void;
   onSelect: (chatId: string | null) => void;
   onSignOut: () => void;
@@ -782,6 +834,26 @@ function ChatSidebar({
         {chats.map((chat) => {
           const active = chat.id === selectedChatId;
           const allowDelete = canDeleteChat(chat, currentUser.id);
+          const actionPending = leaveChatMutation.isPending || deleteChatMutation.isPending;
+          const actionItems =
+            chat.type === 'group'
+              ? buildGroupChatActionItems({
+                  allowDelete,
+                  disabled: actionPending,
+                  onDelete: () => {
+                    setActionError(null);
+                    deleteChatMutation.mutate(chat.id);
+                  },
+                  onLeave: () => {
+                    setActionError(null);
+                    leaveChatMutation.mutate(chat.id);
+                  },
+                  onManage: () => {
+                    setActionError(null);
+                    onOpenGroupManager(chat.id);
+                  },
+                })
+              : [unavailableDirectChatAction()];
           const members = chat.members
             .filter((member) => member.user.id !== currentUser.id)
             .map((member) => `@${member.user.username ?? member.user.name}`)
@@ -827,43 +899,7 @@ function ChatSidebar({
               <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                 <ChatActionsMenu
                   buttonClassName="h-8 w-8 rounded-xl bg-transparent"
-                  items={[
-                    {
-                      label: 'Выйти из чата',
-                      disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
-                      hidden: chat.type !== 'group',
-                      onSelect: () => {
-                        if (!window.confirm('Выйти из этой комнаты?')) {
-                          return;
-                        }
-
-                        setActionError(null);
-                        leaveChatMutation.mutate(chat.id);
-                      },
-                    },
-                    {
-                      label: 'Удалить чат',
-                      disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
-                      hidden: !allowDelete,
-                      tone: 'danger',
-                      onSelect: () => {
-                        if (
-                          !window.confirm(
-                            'Удалить чат для всех участников? Сообщения и голосовая комната тоже исчезнут.',
-                          )
-                        ) {
-                          return;
-                        }
-
-                        setActionError(null);
-                        deleteChatMutation.mutate(chat.id);
-                      },
-                    },
-                    {
-                      ...unavailableDirectChatAction(),
-                      hidden: chat.type !== 'direct',
-                    },
-                  ]}
+                  items={actionItems}
                 />
               </div>
             </div>
@@ -1035,13 +1071,19 @@ function GroupMemberManager({
 function ChatView({
   chat,
   currentUserId,
+  onConsumeRoomPanelRequest,
   socket,
+  roomPanelRequestChatId,
+  roomPanelRequestVersion,
   onBack,
   onOpenSidebar,
 }: {
   chat: Chat;
   currentUserId: string;
+  onConsumeRoomPanelRequest: () => void;
   socket: ChatSocket | null;
+  roomPanelRequestChatId: string | null;
+  roomPanelRequestVersion: number;
   onBack: () => void;
   onOpenSidebar: () => void;
 }) {
@@ -1170,6 +1212,12 @@ function ChatView({
     setActionError(null);
   }, [chat.id]);
 
+  useEffect(() => {
+    if (roomPanelRequestChatId !== chat.id) return;
+    setRoomPanelOpen(true);
+    onConsumeRoomPanelRequest();
+  }, [chat.id, onConsumeRoomPanelRequest, roomPanelRequestChatId, roomPanelRequestVersion]);
+
   const messages =
     messagesQuery.data?.pages
       .slice()
@@ -1182,45 +1230,25 @@ function ChatView({
     .filter((user) => typingUserIds.includes(user.id) && user.id !== currentUserId)
     .map((user) => `@${user.username ?? user.name}`);
 
-  const groupActions =
+  const actionPending = leaveChatMutation.isPending || deleteChatMutation.isPending;
+  const chatActions =
     chat.type === 'group'
-      ? [
-          {
-            label: 'Пригласить или переименовать',
-            disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
-            onSelect: () => setRoomPanelOpen(true),
+      ? buildGroupChatActionItems({
+          allowDelete,
+          disabled: actionPending,
+          onDelete: () => {
+            setActionError(null);
+            deleteChatMutation.mutate();
           },
-          {
-            label: 'Выйти из комнаты',
-            disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
-            onSelect: () => {
-              if (!window.confirm('Выйти из этой комнаты?')) {
-                return;
-              }
-
-              setActionError(null);
-              leaveChatMutation.mutate();
-            },
+          onLeave: () => {
+            setActionError(null);
+            leaveChatMutation.mutate();
           },
-          {
-            label: 'Удалить чат',
-            disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
-            hidden: !allowDelete,
-            tone: 'danger' as const,
-            onSelect: () => {
-              if (
-                !window.confirm(
-                  'Удалить комнату для всех участников? Сообщения и голосовая комната тоже исчезнут.',
-                )
-              ) {
-                return;
-              }
-
-              setActionError(null);
-              deleteChatMutation.mutate();
-            },
+          onManage: () => {
+            setActionError(null);
+            setRoomPanelOpen(true);
           },
-        ]
+        })
       : [unavailableDirectChatAction()];
 
   return (
@@ -1252,7 +1280,7 @@ function ChatView({
             </button>
           )}
 
-          <ChatActionsMenu items={groupActions} />
+          <ChatActionsMenu items={chatActions} />
 
           <button
             className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
@@ -1372,6 +1400,8 @@ function ChatLayout() {
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
   const [socket, setSocket] = useState<ChatSocket | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [roomPanelRequestChatId, setRoomPanelRequestChatId] = useState<string | null>(null);
+  const [roomPanelRequestVersion, setRoomPanelRequestVersion] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [socketGeneration, setSocketGeneration] = useState(0);
   const [localUsername, setLocalUsername] = useState<string | null>(baseUser?.username ?? null);
@@ -1492,6 +1522,12 @@ function ChatLayout() {
     queryClient.invalidateQueries({ queryKey: ['voicePresence'] });
   }
 
+  function handleOpenGroupManager(chatId: string) {
+    setSelectedChatId(chatId);
+    setRoomPanelRequestChatId(chatId);
+    setRoomPanelRequestVersion((value) => value + 1);
+  }
+
   if (!baseUser) return <LoadingScreen />;
 
   const currentUser: CurrentUser = {
@@ -1506,6 +1542,7 @@ function ChatLayout() {
           <ChatSidebar
             chats={chats}
             currentUser={currentUser}
+            onOpenGroupManager={handleOpenGroupManager}
             onOpenProfile={() => setProfileOpen(true)}
             onSelect={setSelectedChatId}
             onSignOut={signOut}
@@ -1519,8 +1556,11 @@ function ChatLayout() {
             <ChatView
               chat={selectedChat}
               currentUserId={currentUser.id}
+              onConsumeRoomPanelRequest={() => setRoomPanelRequestChatId(null)}
               onBack={() => setSelectedChatId(null)}
               onOpenSidebar={() => setSidebarOpen(true)}
+              roomPanelRequestChatId={roomPanelRequestChatId}
+              roomPanelRequestVersion={roomPanelRequestVersion}
               socket={socket}
             />
           ) : (
@@ -1552,6 +1592,7 @@ function ChatLayout() {
             <ChatSidebar
               chats={chats}
               currentUser={currentUser}
+              onOpenGroupManager={handleOpenGroupManager}
               onOpenProfile={() => setProfileOpen(true)}
               onSelect={setSelectedChatId}
               onSignOut={signOut}

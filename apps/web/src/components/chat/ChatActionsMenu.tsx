@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-type ChatActionItem = {
+export type ChatActionItem = {
   label: string;
   onSelect: () => void;
   tone?: 'default' | 'danger';
@@ -60,7 +60,7 @@ export function ChatActionsMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={MENU_BUTTON_LABEL}
-        className={`grid h-9 w-9 place-items-center rounded-xl border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)] ${buttonClassName}`}
+        className={`grid h-9 w-9 place-items-center rounded-xl border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)] outline-none transition-colors duration-150 hover:bg-[var(--panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${buttonClassName}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
