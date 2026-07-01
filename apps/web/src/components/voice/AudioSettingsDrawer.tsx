@@ -5,6 +5,10 @@ import {
   type NoiseSuppressionLevel,
   type VoiceCapturePreferences,
 } from '../../features/voice/audio/audioConstraints';
+import {
+  MAX_VOICE_PEER_VOLUME,
+  MIN_VOICE_PEER_VOLUME,
+} from '../../features/voice/audio/usePersistentPeerVolumes';
 
 function ToggleRow({
   checked,
@@ -61,8 +65,8 @@ export function AudioSettingsDrawer({
   setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
   micLevel: number;
   micSpeaking: boolean;
-  remoteVolumes: Array<{ identity: string; label: string; value: number }>;
-  onRemoteVolumeChange: (identity: string, nextValue: number) => void;
+  remoteVolumes: Array<{ remoteUserId: string; label: string; value: number }>;
+  onRemoteVolumeChange: (remoteUserId: string, nextValue: number) => void;
 }) {
   useEffect(() => {
     if (!open) return;
@@ -237,12 +241,14 @@ export function AudioSettingsDrawer({
                     <span className="text-sm font-medium text-[var(--text)]">
                       Громкость участников
                     </span>
-                    <span className="text-xs text-[var(--muted)]">0-200%</span>
+                    <span className="text-xs text-[var(--muted)]">
+                      {MIN_VOICE_PEER_VOLUME}-{MAX_VOICE_PEER_VOLUME}%
+                    </span>
                   </div>
 
                   <div className="grid min-w-0 gap-4">
                     {remoteVolumes.map((item) => (
-                      <label className="grid min-w-0 gap-2" key={item.identity}>
+                      <label className="grid min-w-0 gap-2" key={item.remoteUserId}>
                         <div className="flex min-w-0 items-center justify-between gap-3">
                           <span className="truncate text-sm text-[var(--text)]">{item.label}</span>
                           <span className="shrink-0 text-xs text-[var(--muted)]">
@@ -251,10 +257,10 @@ export function AudioSettingsDrawer({
                         </div>
                         <input
                           className="audio-slider w-full min-w-0 accent-[var(--accent)]"
-                          max={200}
-                          min={0}
+                          max={MAX_VOICE_PEER_VOLUME}
+                          min={MIN_VOICE_PEER_VOLUME}
                           onChange={(event) =>
-                            onRemoteVolumeChange(item.identity, Number(event.target.value))
+                            onRemoteVolumeChange(item.remoteUserId, Number(event.target.value))
                           }
                           type="range"
                           value={item.value}

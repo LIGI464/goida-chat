@@ -30,6 +30,7 @@ import {
   type VoiceCapturePreferences,
 } from './features/voice/audio/audioConstraints';
 import { useAudioDevices } from './features/voice/audio/useAudioDevices';
+import { usePersistentPeerVolumes } from './features/voice/audio/usePersistentPeerVolumes';
 import { api, type Chat, type Message, type PublicUser, type VoiceToken } from './lib/api';
 import { authClient } from './lib/auth-client';
 import { createChatSocket, type ChatSocket } from './lib/socket';
@@ -1802,9 +1803,6 @@ function ChatLayout() {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const [voiceDeafened, setVoiceDeafened] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
-  const [voiceRemoteParticipantVolumes, setVoiceRemoteParticipantVolumes] = useState<
-    Record<string, number>
-  >({});
   const [voiceCapturePreferences, setVoiceCapturePreferences] = useState<
     Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>
   >(() => {
@@ -1818,6 +1816,10 @@ function ChatLayout() {
   const [noiseSuppressionLevel, setNoiseSuppressionLevel] = useState<NoiseSuppressionLevel>(
     () => readVoiceCapturePreferences().noiseSuppressionLevel,
   );
+  const {
+    remoteParticipantVolumes: voiceRemoteParticipantVolumes,
+    setRemoteParticipantVolume,
+  } = usePersistentPeerVolumes(baseUser?.id ?? null);
   const { activeDeviceId, devices, setMicDeviceId } = useAudioDevices();
   const activeVoiceChatIdRef = useRef<string | null>(null);
   const voicePresenceChatIdRef = useRef<string | null>(null);
@@ -1868,7 +1870,6 @@ function ChatLayout() {
 
   useEffect(() => {
     setVoiceSettingsOpen(false);
-    setVoiceRemoteParticipantVolumes({});
   }, [activeVoiceChatId]);
 
   useEffect(() => {
@@ -2131,8 +2132,8 @@ function ChatLayout() {
       onJoinVoice={joinVoiceChat}
       onLeaveVoice={leaveVoiceChat}
       onOpenSettings={() => setVoiceSettingsOpen(true)}
-      onRemoteParticipantVolumeChange={(identity, nextValue) => {
-        setVoiceRemoteParticipantVolumes((current) => ({ ...current, [identity]: nextValue }));
+      onRemoteParticipantVolumeChange={(remoteUserId, nextValue) => {
+        setRemoteParticipantVolume(remoteUserId, nextValue);
       }}
       onReturnToVoice={() => {
         if (activeVoiceChatId) {

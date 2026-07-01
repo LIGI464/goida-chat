@@ -14,10 +14,26 @@ import type {
   NoiseSuppressionLevel,
   VoiceCapturePreferences,
 } from '../../features/voice/audio/audioConstraints';
+import { DEFAULT_VOICE_PEER_VOLUME } from '../../features/voice/audio/usePersistentPeerVolumes';
 import type { Chat, PublicUser } from '../../lib/api';
 import { AudioSettingsDrawer } from './AudioSettingsDrawer';
 import { CallControls } from './CallControls';
 import { ParticipantTile } from './ParticipantTile';
+
+function resolveParticipantUserId(participant: { identity: string; metadata?: string }) {
+  if (participant.metadata) {
+    try {
+      const parsed = JSON.parse(participant.metadata) as { userId?: unknown };
+      if (typeof parsed.userId === 'string' && parsed.userId) {
+        return parsed.userId;
+      }
+    } catch {
+      // Fall back to LiveKit identity when metadata is absent or malformed.
+    }
+  }
+
+  return participant.identity;
+}
 
 function connectionLabel(connectionState: ConnectionState) {
   if (connectionState === ConnectionState.Reconnecting) {
@@ -68,7 +84,7 @@ export function CallStage({
   noiseSuppressionLevel: NoiseSuppressionLevel;
   setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
   remoteParticipantVolumes: Record<string, number>;
-  onRemoteParticipantVolumeChange: (identity: string, nextValue: number) => void;
+  onRemoteParticipantVolumeChange: (remoteUserId: string, nextValue: number) => void;
 }) {
   const connectionState = useConnectionState();
   const participants = useParticipants();
@@ -81,8 +97,9 @@ export function CallStage({
 
   useEffect(() => {
     for (const participant of remoteParticipants) {
-      const nextVolume = remoteParticipantVolumes[participant.identity];
-      participant.setVolume((nextVolume ?? 100) / 100);
+      const remoteUserId = resolveParticipantUserId(participant);
+      const nextVolume = remoteParticipantVolumes[remoteUserId];
+      participant.setVolume((nextVolume ?? DEFAULT_VOICE_PEER_VOLUME) / 100);
     }
   }, [remoteParticipantVolumes, remoteParticipants]);
 
@@ -101,11 +118,15 @@ export function CallStage({
         ? 'mx-auto max-w-5xl grid-cols-1 md:grid-cols-2'
         : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3';
 
-  const remoteVolumes = remoteParticipants.map((participant) => ({
-    identity: participant.identity,
-    label: `@${userMap.get(participant.identity)?.username ?? participant.name ?? participant.identity}`,
-    value: remoteParticipantVolumes[participant.identity] ?? 100,
-  }));
+  const remoteVolumes = remoteParticipants.map((participant) => {
+    const remoteUserId = resolveParticipantUserId(participant);
+
+    return {
+      remoteUserId,
+      label: `@${userMap.get(remoteUserId)?.username ?? participant.name ?? remoteUserId}`,
+      value: remoteParticipantVolumes[remoteUserId] ?? DEFAULT_VOICE_PEER_VOLUME,
+    };
+  });
 
   return (
     <section className="shrink-0 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-4 md:px-6">
@@ -153,8 +174,11 @@ export function CallStage({
                 const trackRef = trackRefs.find(
                   (candidate) => candidate.participant.identity === participant.identity,
                 ) as TrackReferenceOrPlaceholder | undefined;
-                const user = userMap.get(participant.identity);
-                const displayName = `@${user?.username ?? participant.name ?? user?.name ?? participant.identity}`;
+                const remoteUserId = resolveParticipantUserId(participant);
+                const user = userMap.get(remoteUserId);
+                const displayName = `@${
+                  user?.username ?? participant.name ?? user?.name ?? remoteUserId
+                }`;
 
                 return (
                   <ParticipantTile

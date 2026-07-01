@@ -22,7 +22,10 @@ export async function registerVoiceRoutes(app: FastifyInstance) {
         identity: user.id,
         name: user.username ?? user.name ?? user.id,
         ttl: '6h',
-        metadata: JSON.stringify({ username: user.username ?? user.name ?? user.id }),
+        metadata: JSON.stringify({
+          userId: user.id,
+          username: user.username ?? user.name ?? user.id,
+        }),
       });
       token.addGrant({
         room: voiceRoom.livekitRoomName,

@@ -191,7 +191,7 @@ function ConnectedVoiceStage({
   onCloseSettings: () => void;
   onLeaveVoice: () => void;
   onOpenSettings: () => void;
-  onRemoteParticipantVolumeChange: (identity: string, nextValue: number) => void;
+  onRemoteParticipantVolumeChange: (remoteUserId: string, nextValue: number) => void;
   onToggleDeafen: () => void;
   remoteParticipantVolumes: Record<string, number>;
   setCapturePreferences: (
@@ -267,7 +267,7 @@ export function VoicePanel({
   onJoinVoice: (chat: Chat) => void;
   onLeaveVoice: () => void;
   onOpenSettings: () => void;
-  onRemoteParticipantVolumeChange: (identity: string, nextValue: number) => void;
+  onRemoteParticipantVolumeChange: (remoteUserId: string, nextValue: number) => void;
   onReturnToVoice: () => void;
   onToggleDeafen: () => void;
   remoteParticipantVolumes: Record<string, number>;
