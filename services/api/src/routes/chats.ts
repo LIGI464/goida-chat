@@ -10,7 +10,7 @@ import {
   renameChatSchema,
 } from '@goida-chat/shared';
 
-import { badRequest, notFound } from '../lib/http.js';
+import { badRequest, forbidden, notFound } from '../lib/http.js';
 import { prisma } from '../lib/prisma.js';
 import { publicUser, requireSession } from '../lib/session.js';
 import { valkey } from '../lib/valkey.js';
@@ -357,8 +357,31 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
 
     if (chat.type === 'direct') throw badRequest('Direct chat cannot be left');
 
-    await prisma.chatMember.delete({
-      where: { chatId_userId: { chatId: params.chatId, userId: session.user.id } },
+    const previousMemberIds = chat.members.map((member) => member.userId);
+    const remainingMemberIds = previousMemberIds.filter((userId) => userId !== session.user.id);
+    const shouldDeleteChat = remainingMemberIds.length === 0;
+
+    const remaining = await prisma.$transaction(async (tx) => {
+      await tx.chatMember.delete({
+        where: { chatId_userId: { chatId: params.chatId, userId: session.user.id } },
+      });
+
+      if (shouldDeleteChat) {
+        await tx.chat.delete({ where: { id: params.chatId } });
+        return null;
+      }
+
+      if (chat.createdById === session.user.id) {
+        await tx.chat.update({
+          where: { id: params.chatId },
+          data: { createdById: remainingMemberIds[0] ?? null },
+        });
+      }
+
+      return tx.chat.findUnique({
+        where: { id: params.chatId },
+        include: chatInclude,
+      });
     });
 
     await Promise.all([
@@ -367,13 +390,18 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     ]);
     await io.in(`user:${session.user.id}`).socketsLeave(`chat:${params.chatId}`);
 
-    const remaining = await prisma.chat.findUnique({
-      where: { id: params.chatId },
-      include: chatInclude,
-    });
+    if (shouldDeleteChat) {
+      await valkey.del(`presence:chat:${params.chatId}:typing`, `voice:chat:${params.chatId}:users`);
+    }
 
-    invalidateChatLists(chat.members.map((member) => member.userId));
+    invalidateChatLists(previousMemberIds);
     io.to(`user:${session.user.id}`).emit('chat:deleted', { chatId: params.chatId });
+    if (shouldDeleteChat) {
+      io.to(`chat:${params.chatId}`).emit('chat:deleted', { chatId: params.chatId });
+      await io.in(`chat:${params.chatId}`).socketsLeave(`chat:${params.chatId}`);
+      return { ok: true };
+    }
+
     io.to(`chat:${params.chatId}`).emit('chat:member-removed', {
       chatId: params.chatId,
       userId: session.user.id,
@@ -386,12 +414,11 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
       chatId: params.chatId,
       users: await getVoicePresence(params.chatId),
     });
-    if (!remaining) return { ok: true };
 
-    io.to(`chat:${params.chatId}`).emit(
-      'chat:updated',
-      await enrichChat(remaining, session.user.id),
-    );
+    if (!remaining) {
+      return { ok: true };
+    }
+
     await emitChatSnapshot(
       'chat:updated',
       remaining,
@@ -411,6 +438,10 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     });
 
     if (!chat) throw notFound('Chat not found');
+    if (chat.type === 'direct') throw badRequest('Direct chats cannot be deleted');
+    if (chat.createdById !== session.user.id) {
+      throw forbidden('Only the room owner can delete this room');
+    }
 
     const memberIds = chat.members.map((member) => member.userId);
 

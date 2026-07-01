@@ -141,6 +141,16 @@ function removeChat(data: ChatListData | undefined, chatId: string): ChatListDat
   return { chats: data.chats.filter((chat) => chat.id !== chatId) };
 }
 
+function clearChatClientState(queryClient: QueryClient, chatId: string) {
+  queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chatId));
+  queryClient.removeQueries({ queryKey: ['messages', chatId] });
+  queryClient.removeQueries({ queryKey: ['voicePresence', chatId] });
+}
+
+function canDeleteChat(chat: Chat, currentUserId: string) {
+  return chat.type === 'group' && chat.createdById === currentUserId;
+}
+
 function patchChatsWithMessage(
   data: ChatListData | undefined,
   message: Message,
@@ -557,6 +567,7 @@ function ChatSidebar({
   const [search, setSearch] = useState('');
   const [groupTitle, setGroupTitle] = useState(() => randomRoomTitle());
   const [groupMembers, setGroupMembers] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
   const normalizedSearch = normalizeUserSearch(search);
 
   const userSearch = useQuery({
@@ -588,13 +599,32 @@ function ChatSidebar({
   const deleteChatMutation = useMutation({
     mutationFn: api.deleteChat,
     onSuccess: (_, chatId) => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chatId));
-      queryClient.removeQueries({ queryKey: ['messages', chatId] });
-      queryClient.removeQueries({ queryKey: ['voicePresence', chatId] });
-
+      clearChatClientState(queryClient, chatId);
+      setActionError(null);
       if (selectedChatId === chatId) {
-        onSelect(chats.find((chat) => chat.id !== chatId)?.id ?? null);
+        onSelect(null);
       }
+
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
+    },
+  });
+
+  const leaveChatMutation = useMutation({
+    mutationFn: api.leaveGroupChat,
+    onSuccess: (_, chatId) => {
+      clearChatClientState(queryClient, chatId);
+      setActionError(null);
+      if (selectedChatId === chatId) {
+        onSelect(null);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
     },
   });
 
@@ -734,10 +764,16 @@ function ChatSidebar({
       </form>
 
       <div className="mt-3 min-h-0 flex-1 overflow-auto pr-1">
+        {actionError && (
+          <p className="mb-3 rounded-xl border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+            {actionError}
+          </p>
+        )}
         {chats.length === 0 && <p className="mt-8 text-sm text-[var(--muted)]">Пока пусто</p>}
 
         {chats.map((chat) => {
           const active = chat.id === selectedChatId;
+          const allowDelete = canDeleteChat(chat, currentUser.id);
           const members = chat.members
             .filter((member) => member.user.id !== currentUser.id)
             .map((member) => `@${member.user.username ?? member.user.name}`)
@@ -786,21 +822,21 @@ function ChatSidebar({
                   items={[
                     {
                       label: 'Выйти из чата',
+                      disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
                       hidden: chat.type !== 'group',
-                      onSelect: async () => {
-                        await api.leaveGroupChat(chat.id);
-                        queryClient.setQueryData<ChatListData>(['chats'], (old) =>
-                          removeChat(old, chat.id),
-                        );
-                        queryClient.removeQueries({ queryKey: ['messages', chat.id] });
-                        queryClient.removeQueries({ queryKey: ['voicePresence', chat.id] });
-                        if (selectedChatId === chat.id) {
-                          onSelect(chats.find((item) => item.id !== chat.id)?.id ?? null);
+                      onSelect: () => {
+                        if (!window.confirm('Выйти из этой комнаты?')) {
+                          return;
                         }
+
+                        setActionError(null);
+                        leaveChatMutation.mutate(chat.id);
                       },
                     },
                     {
                       label: 'Удалить чат',
+                      disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
+                      hidden: !allowDelete,
                       tone: 'danger',
                       onSelect: () => {
                         if (
@@ -811,6 +847,7 @@ function ChatSidebar({
                           return;
                         }
 
+                        setActionError(null);
                         deleteChatMutation.mutate(chat.id);
                       },
                     },
@@ -999,8 +1036,10 @@ function ChatView({
   const queryClient = useQueryClient();
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+  const allowDelete = canDeleteChat(chat, currentUserId);
 
   const messagesQuery = useInfiniteQuery({
     queryKey: ['messages', chat.id],
@@ -1019,20 +1058,26 @@ function ChatView({
   const deleteChatMutation = useMutation({
     mutationFn: () => api.deleteChat(chat.id),
     onSuccess: () => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chat.id));
-      queryClient.removeQueries({ queryKey: ['messages', chat.id] });
-      queryClient.removeQueries({ queryKey: ['voicePresence', chat.id] });
+      clearChatClientState(queryClient, chat.id);
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
       onBack();
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
     },
   });
 
   const leaveChatMutation = useMutation({
     mutationFn: () => api.leaveGroupChat(chat.id),
     onSuccess: () => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chat.id));
-      queryClient.removeQueries({ queryKey: ['messages', chat.id] });
-      queryClient.removeQueries({ queryKey: ['voicePresence', chat.id] });
+      clearChatClientState(queryClient, chat.id);
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
       onBack();
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
     },
   });
 
@@ -1110,6 +1155,7 @@ function ChatView({
 
   useEffect(() => {
     setRoomPanelOpen(false);
+    setActionError(null);
   }, [chat.id]);
 
   const messages =
@@ -1128,36 +1174,46 @@ function ChatView({
     chat.type === 'group'
       ? [
           {
-            label: 'Пригласить или переименовать',
+            label: '\u041f\u0440\u0438\u0433\u043b\u0430\u0441\u0438\u0442\u044c \u0438\u043b\u0438 \u043f\u0435\u0440\u0435\u0438\u043c\u0435\u043d\u043e\u0432\u0430\u0442\u044c',
+            disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
             onSelect: () => setRoomPanelOpen(true),
           },
           {
-            label: 'Выйти из комнаты',
-            onSelect: () => leaveChatMutation.mutate(),
-          },
-          {
-            label: 'Удалить чат',
-            tone: 'danger' as const,
+            label: '\u0412\u044b\u0439\u0442\u0438 \u0438\u0437 \u043a\u043e\u043c\u043d\u0430\u0442\u044b',
+            disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
             onSelect: () => {
-              if (!window.confirm('Удалить комнату для всех участников?')) {
+              if (
+                !window.confirm(
+                  '\u0412\u044b\u0439\u0442\u0438 \u0438\u0437 \u044d\u0442\u043e\u0439 \u043a\u043e\u043c\u043d\u0430\u0442\u044b?',
+                )
+              ) {
                 return;
               }
+
+              setActionError(null);
+              leaveChatMutation.mutate();
+            },
+          },
+          {
+            label: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0447\u0430\u0442',
+            disabled: leaveChatMutation.isPending || deleteChatMutation.isPending,
+            hidden: !allowDelete,
+            tone: 'danger' as const,
+            onSelect: () => {
+              if (
+                !window.confirm(
+                  '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043a\u043e\u043c\u043d\u0430\u0442\u0443 \u0434\u043b\u044f \u0432\u0441\u0435\u0445 \u0443\u0447\u0430\u0441\u0442\u043d\u0438\u043a\u043e\u0432? \u0421\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u044f \u0438 \u0433\u043e\u043b\u043e\u0441\u043e\u0432\u0430\u044f \u043a\u043e\u043c\u043d\u0430\u0442\u0430 \u0442\u043e\u0436\u0435 \u0438\u0441\u0447\u0435\u0437\u043d\u0443\u0442.',
+                )
+              ) {
+                return;
+              }
+
+              setActionError(null);
               deleteChatMutation.mutate();
             },
           },
         ]
-      : [
-          {
-            label: 'Удалить чат',
-            tone: 'danger' as const,
-            onSelect: () => {
-              if (!window.confirm('Удалить этот личный чат целиком?')) {
-                return;
-              }
-              deleteChatMutation.mutate();
-            },
-          },
-        ];
+      : [];
 
   return (
     <section className="flex min-h-screen flex-col bg-[var(--bg)]">
@@ -1199,6 +1255,12 @@ function ChatView({
           </button>
         </div>
       </header>
+
+      {actionError && (
+        <div className="border-b border-[var(--border)] bg-red-950/30 px-4 py-3 text-sm text-red-200 md:px-5">
+          {actionError}
+        </div>
+      )}
 
       {chat.type === 'group' && roomPanelOpen && (
         <div className="border-b border-[var(--border)] px-4 py-4 md:px-6">
@@ -1368,9 +1430,7 @@ function ChatLayout() {
     });
 
     nextSocket.on('chat:deleted', ({ chatId }) => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chatId));
-      queryClient.removeQueries({ queryKey: ['messages', chatId] });
-      queryClient.removeQueries({ queryKey: ['voicePresence', chatId] });
+      clearChatClientState(queryClient, chatId);
       setSelectedChatId((current) => (current === chatId ? null : current));
     });
 

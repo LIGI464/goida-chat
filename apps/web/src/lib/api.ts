@@ -31,6 +31,7 @@ export type Chat = {
   id: string;
   type: 'direct' | 'group';
   title?: string | null;
+  createdById?: string | null;
   displayTitle?: string | null;
   createdAt: string;
   updatedAt: string;

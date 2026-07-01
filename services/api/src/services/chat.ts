@@ -92,6 +92,7 @@ export function serializeChat(chat: ChatWithDetails, currentUserId: string) {
     id: chat.id,
     type: chat.type,
     title: chat.title,
+    createdById: chat.createdById,
     displayTitle,
     createdAt: chat.createdAt,
     updatedAt: chat.updatedAt,
