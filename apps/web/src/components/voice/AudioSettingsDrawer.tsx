@@ -49,7 +49,7 @@ function ToggleRow({
 }) {
   return (
     <label
-      className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-[22px] border border-[var(--border)] bg-black/10 px-3 py-3 ${
+      className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-[22px] border border-[var(--border)] bg-[rgba(255,255,255,0.025)] px-3 py-3 ${
         disabled ? 'opacity-70' : ''
       }`}
     >
@@ -126,26 +126,27 @@ export function AudioSettingsDrawer({
     <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 md:items-center md:justify-end md:p-6">
       <button
         aria-label="Закрыть настройки звука"
-        className="absolute inset-0 bg-black/45"
+        className="brand-overlay absolute inset-0"
         onClick={onClose}
         type="button"
       />
 
       <aside
         aria-modal="true"
-        className="audio-settings-panel relative z-10 flex max-h-[85vh] w-[min(90vw,480px)] min-w-0 max-w-[520px] flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--panel)] shadow-[0_30px_80px_rgba(0,0,0,0.4)]"
+        className="audio-settings-panel brand-modal relative z-10 flex max-h-[85vh] w-[min(90vw,480px)] min-w-0 max-w-[520px] flex-col overflow-hidden"
         role="dialog"
       >
-        <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-4 py-4 md:px-5">
+        <div className="flex items-start justify-between gap-3 border-b brand-divider px-4 py-4 md:px-5">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-[var(--text)]">Настройки звука</h3>
-            <p className="text-sm text-[var(--muted)]">
-              Микрофон, шумодав и обработка аудио.
-            </p>
+            <p className="brand-eyebrow text-[11px] text-[var(--muted)]">Audio settings</p>
+            <h3 className="brand-display mt-2 text-base font-semibold text-[var(--text)]">
+              Настройки звука
+            </h3>
+            <p className="mt-2 text-sm text-[var(--muted)]">Микрофон, шумодав и обработка аудио.</p>
           </div>
           <button
             aria-label="Закрыть"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] text-[var(--text)]"
+            className="brand-button brand-button-secondary grid h-9 w-9 shrink-0 place-items-center rounded-2xl p-0 text-[var(--text)]"
             onClick={onClose}
             type="button"
           >
@@ -161,7 +162,7 @@ export function AudioSettingsDrawer({
               </span>
               <label className="relative block">
                 <select
-                  className="h-11 w-full min-w-0 appearance-none rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] px-3 pr-11 text-sm leading-5 text-[var(--text)] outline-none transition-colors duration-150 focus:border-[var(--accent)]"
+                  className="brand-input h-11 w-full min-w-0 appearance-none px-3 pr-11 text-sm leading-5 text-[var(--text)]"
                   onChange={(event) => setMicDeviceId(event.target.value)}
                   value={activeDeviceId}
                 >
@@ -184,7 +185,7 @@ export function AudioSettingsDrawer({
               </span>
               <label className="relative block">
                 <select
-                  className="h-11 w-full min-w-0 appearance-none rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] px-3 pr-11 text-sm leading-5 text-[var(--text)] outline-none transition-colors duration-150 focus:border-[var(--accent)]"
+                  className="brand-input h-11 w-full min-w-0 appearance-none px-3 pr-11 text-sm leading-5 text-[var(--text)]"
                   onChange={(event) =>
                     setNoiseSuppressionMode(event.target.value as NoiseSuppressionMode)
                   }
@@ -220,9 +221,11 @@ export function AudioSettingsDrawer({
               </p>
             </section>
 
-            <section className="grid gap-3 rounded-[24px] border border-[var(--border)] bg-[var(--panel-2)] p-4">
+            <section className="brand-surface grid gap-3 rounded-[24px] p-4">
               <div>
-                <h4 className="text-sm font-medium text-[var(--text)]">Браузерные capture constraints</h4>
+                <h4 className="text-sm font-medium text-[var(--text)]">
+                  Браузерные capture constraints
+                </h4>
                 <p className="text-xs leading-5 text-[var(--muted)]">
                   {browserCleanupLocked
                     ? 'В режимах Browser и Enhanced echo cancellation, auto gain control и noise suppression включаются автоматически.'
@@ -257,7 +260,7 @@ export function AudioSettingsDrawer({
               />
             </section>
 
-            <section className="rounded-[24px] border border-[var(--border)] bg-[var(--panel-2)] p-4">
+            <section className="brand-surface rounded-[24px] p-4">
               <div className="mb-3 flex items-center justify-between gap-3">
                 <span className="text-sm font-medium text-[var(--text)]">Уровень микрофона</span>
                 <span
@@ -280,7 +283,7 @@ export function AudioSettingsDrawer({
             </section>
 
             {remoteVolumes.length > 0 && (
-              <section className="rounded-[24px] border border-[var(--border)] bg-[var(--panel-2)] p-4">
+              <section className="brand-surface rounded-[24px] p-4">
                 <div className="mb-3 flex items-center justify-between gap-3">
                   <span className="text-sm font-medium text-[var(--text)]">
                     Громкость участников
@@ -295,9 +298,7 @@ export function AudioSettingsDrawer({
                     <label className="grid min-w-0 gap-2" key={item.remoteUserId}>
                       <div className="flex min-w-0 items-center justify-between gap-3">
                         <span className="truncate text-sm text-[var(--text)]">{item.label}</span>
-                        <span className="shrink-0 text-xs text-[var(--muted)]">
-                          {item.value}%
-                        </span>
+                        <span className="shrink-0 text-xs text-[var(--muted)]">{item.value}%</span>
                       </div>
                       <input
                         className="audio-slider w-full min-w-0 accent-[var(--accent)]"

@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "brand:assets": "node ./scripts/generate-goida-brand-assets.mjs",
     "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev -w @goida-chat/web\" \"npm run dev -w @goida-chat/api\"",
     "build": "npm run build -w @goida-chat/shared && npm run build -w @goida-chat/api && npm run build -w @goida-chat/web",
     "typecheck": "npm run build -w @goida-chat/shared && npm run typecheck -w @goida-chat/shared && npm run typecheck -w @goida-chat/api && npm run typecheck -w @goida-chat/web",
@@ -21,11 +22,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@resvg/resvg-js": "^2.6.2",
     "concurrently": "^9.0.0",
+    "effect": "3.21.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.0.0",
-    "effect": "3.21.0",
     "globals": "^16.0.0",
+    "opentype.js": "^2.0.0",
+    "png-to-ico": "^3.0.1",
     "prettier": "^3.0.0",
     "typescript-eslint": "^8.0.0"
   },

@@ -20,6 +20,7 @@ import {
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 
+import { GoidaLogo } from './components/brand/GoidaLogo';
 import { ChatActionsMenu, type ChatActionItem } from './components/chat/ChatActionsMenu';
 import { ConnectedVoiceRuntime, VoicePanel } from './components/voice/VoicePanel';
 import {
@@ -63,6 +64,23 @@ type MessagesInfinite = InfiniteData<MessagesPage, string | null>;
 type ChatListData = { chats: Chat[] };
 type CurrentUser = { id: string; name: string; username?: string | null };
 type VoiceDisconnectAction = 'leave' | 'removed' | 'switch';
+
+const brandInputClassName = 'brand-input h-11 px-4 text-sm';
+const brandInputCompactClassName = 'brand-input h-10 px-3.5 text-sm';
+const brandPrimaryButtonClassName =
+  'brand-button brand-button-primary h-11 px-4 text-sm disabled:opacity-55';
+const brandPrimaryButtonCompactClassName =
+  'brand-button brand-button-primary h-10 px-4 text-sm disabled:opacity-55';
+const brandSecondaryButtonClassName =
+  'brand-button brand-button-secondary h-11 px-4 text-sm disabled:opacity-55';
+const brandSecondaryButtonCompactClassName =
+  'brand-button brand-button-secondary h-10 px-3.5 text-sm disabled:opacity-55';
+const brandGhostButtonClassName =
+  'brand-button brand-button-ghost h-9 px-2.5 text-sm disabled:opacity-55';
+const brandDangerNoticeClassName =
+  'rounded-2xl border border-[rgba(255,117,130,0.22)] bg-[rgba(84,15,28,0.34)] px-4 py-3 text-sm text-[#ffd8dd]';
+const brandSuccessNoticeClassName =
+  'rounded-2xl border border-[rgba(124,226,188,0.2)] bg-[rgba(14,58,44,0.34)] px-4 py-3 text-sm text-[#c8f7e3]';
 
 function errorMessage(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -127,7 +145,19 @@ function formatChatTime(value?: string | null) {
 
 function LoadingScreen() {
   return (
-    <main className="grid min-h-screen place-items-center text-[var(--muted)]">Загрузка...</main>
+    <main className="grid min-h-screen place-items-center px-4">
+      <section className="brand-card w-full max-w-sm px-6 py-7 text-center">
+        <GoidaLogo
+          className="mx-auto mb-5 block w-20"
+          imageClassName="h-auto w-full object-contain"
+          variant="mark"
+        />
+        <p className="brand-display text-lg text-[var(--text)]">Goida Chat</p>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          Поднимаем брендированное рабочее пространство…
+        </p>
+      </section>
+    </main>
   );
 }
 
@@ -403,82 +433,137 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center p-4">
-      <section className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-xl">
-        <h1 className="mb-1 text-2xl font-semibold">{register ? 'Регистрация' : 'Вход'}</h1>
-        <p className="mb-5 text-sm text-[var(--muted)]">
-          {register ? 'Создай приватный аккаунт' : 'С возвращением'}
-        </p>
-
-        <form className="grid gap-3" onSubmit={submit}>
-          <input
-            autoComplete="email"
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="Email"
-            required
-            type="email"
-            value={email}
-          />
-
-          {register && (
-            <input
-              autoComplete="username"
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              maxLength={24}
-              minLength={3}
-              onChange={(event) => setUsername(event.target.value.toLowerCase())}
-              pattern="[a-z0-9_]+"
-              placeholder="username"
-              required
-              value={username}
+    <main className="grid min-h-screen overflow-hidden px-4 py-8 sm:px-6 lg:px-8">
+      <section className="brand-card relative mx-auto grid w-full max-w-6xl overflow-hidden lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="relative hidden min-h-[620px] overflow-hidden border-r brand-divider px-8 py-10 lg:flex lg:flex-col lg:justify-between xl:px-12">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.09),transparent_28%),linear-gradient(140deg,rgba(255,255,255,0.03),transparent_42%)]" />
+          <div className="relative">
+            <div className="brand-pill brand-eyebrow mb-6 text-[11px] text-[var(--muted-strong)]">
+              Premium private messaging
+            </div>
+            <GoidaLogo
+              className="block max-w-[360px]"
+              imageClassName="h-auto w-full object-contain"
+              variant="lockup"
             />
-          )}
-
-          <input
-            autoComplete={register ? 'new-password' : 'current-password'}
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            minLength={8}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Пароль"
-            required
-            type="password"
-            value={password}
-          />
-
-          {register && (
-            <input
-              autoComplete="new-password"
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              minLength={8}
-              onChange={(event) => setRepeatPassword(event.target.value)}
-              placeholder="Повтори пароль"
-              required
-              type="password"
-              value={repeatPassword}
-            />
-          )}
-
-          {error && (
-            <p className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
-              {error}
+            <h1 className="brand-display mt-10 max-w-lg text-4xl leading-[1.05] font-semibold text-[var(--text)] xl:text-5xl">
+              Строгий dark UI для приватных чатов, комнат и голосовых сессий.
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-7 text-[var(--muted-strong)]">
+              Новый визуальный язык Goida Chat построен вокруг холодного металла, мягкого halo и
+              спокойной типографики без лишнего шума.
             </p>
-          )}
+          </div>
 
-          <button
-            className="h-9 rounded-xl bg-[var(--accent)] px-3 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={pending}
-          >
-            {pending ? 'Подожди...' : register ? 'Создать аккаунт' : 'Войти'}
-          </button>
-        </form>
+          <div className="relative grid gap-3 xl:max-w-[480px]">
+            <div className="brand-surface px-5 py-4">
+              <p className="brand-display text-sm font-semibold text-[var(--text)]">
+                Rooms, calls, identity
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                Личный профиль, быстрые комнаты и независимые voice-сессии остаются на месте, только
+                теперь в цельной брендинговой системе.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-[var(--muted-strong)]">
+              <span className="brand-pill">Silver glow</span>
+              <span className="brand-pill">Minimal dark surfaces</span>
+              <span className="brand-pill">Readable UI hierarchy</span>
+            </div>
+          </div>
+        </div>
 
-        <Link
-          className="mt-4 block text-sm text-[var(--accent)]"
-          to={register ? '/login' : '/register'}
-        >
-          {register ? 'Уже есть аккаунт' : 'Создать аккаунт'}
-        </Link>
+        <div className="relative px-5 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-10">
+          <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center">
+            <div className="mb-8 lg:hidden">
+              <GoidaLogo
+                className="mb-5 block w-20"
+                imageClassName="h-auto w-full object-contain"
+                variant="mark"
+              />
+              <GoidaLogo
+                className="block max-w-[240px]"
+                imageClassName="h-auto w-full object-contain"
+                variant="wordmark"
+              />
+            </div>
+
+            <div className="brand-eyebrow mb-3 text-[11px] text-[var(--muted)]">
+              {register ? 'Create account' : 'Secure sign in'}
+            </div>
+            <h1 className="brand-display mb-2 text-3xl font-semibold text-[var(--text)]">
+              {register ? 'Регистрация' : 'Вход'}
+            </h1>
+            <p className="mb-6 text-sm leading-6 text-[var(--muted)]">
+              {register
+                ? 'Создай приватный аккаунт и зайди в общий премиальный рабочий контур Goida Chat.'
+                : 'Возвращайся в свои комнаты, сообщения и голосовые сессии без лишней суеты.'}
+            </p>
+
+            <form className="grid gap-3" onSubmit={submit}>
+              <input
+                autoComplete="email"
+                className={brandInputClassName}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Email"
+                required
+                type="email"
+                value={email}
+              />
+
+              {register && (
+                <input
+                  autoComplete="username"
+                  className={brandInputClassName}
+                  maxLength={24}
+                  minLength={3}
+                  onChange={(event) => setUsername(event.target.value.toLowerCase())}
+                  pattern="[a-z0-9_]+"
+                  placeholder="username"
+                  required
+                  value={username}
+                />
+              )}
+
+              <input
+                autoComplete={register ? 'new-password' : 'current-password'}
+                className={brandInputClassName}
+                minLength={8}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Пароль"
+                required
+                type="password"
+                value={password}
+              />
+
+              {register && (
+                <input
+                  autoComplete="new-password"
+                  className={brandInputClassName}
+                  minLength={8}
+                  onChange={(event) => setRepeatPassword(event.target.value)}
+                  placeholder="Повтори пароль"
+                  required
+                  type="password"
+                  value={repeatPassword}
+                />
+              )}
+
+              {error && <p className={brandDangerNoticeClassName}>{error}</p>}
+
+              <button className={brandPrimaryButtonClassName} disabled={pending}>
+                {pending ? 'Подожди...' : register ? 'Создать аккаунт' : 'Войти'}
+              </button>
+            </form>
+
+            <Link
+              className="brand-link mt-5 inline-flex w-fit text-sm"
+              to={register ? '/login' : '/register'}
+            >
+              {register ? 'Уже есть аккаунт' : 'Создать аккаунт'}
+            </Link>
+          </div>
+        </div>
       </section>
     </main>
   );
@@ -517,7 +602,7 @@ function UserSearchResults({
 
         return (
           <div
-            className="flex items-center justify-between gap-3 rounded-xl px-2 py-2 transition-colors duration-150 hover:bg-white/5"
+            className="flex items-center justify-between gap-3 rounded-2xl px-2.5 py-2.5 transition-colors duration-150 hover:bg-white/5"
             key={user.id}
           >
             <div className="min-w-0">
@@ -525,7 +610,7 @@ function UserSearchResults({
               <p className="truncate text-xs text-[var(--muted)]">{user.name || 'Игрок'}</p>
             </div>
             <button
-              className="h-8 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-2 text-xs text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="brand-button brand-button-secondary h-8 rounded-xl px-3 text-xs font-semibold disabled:opacity-55"
               disabled={disabled || !username}
               onClick={() => username && onAction(username)}
               type="button"
@@ -580,18 +665,17 @@ function ProfileDialog({
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-2xl">
+    <div className="brand-overlay fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="brand-modal w-full max-w-sm p-5">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Профиль</h2>
-            <p className="text-sm text-[var(--muted)]">Пока только ник, без лишнего шума.</p>
+            <p className="brand-eyebrow text-[11px] text-[var(--muted)]">Identity</p>
+            <h2 className="brand-display mt-2 text-lg font-semibold text-[var(--text)]">Профиль</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+              Пока только ник, без лишнего шума.
+            </p>
           </div>
-          <button
-            className="text-sm text-[var(--muted)] hover:text-[var(--text)]"
-            onClick={onClose}
-            type="button"
-          >
+          <button className={brandGhostButtonClassName} onClick={onClose} type="button">
             Закрыть
           </button>
         </div>
@@ -601,7 +685,7 @@ function ProfileDialog({
             <span className="text-sm text-[var(--muted)]">Ник</span>
             <input
               autoComplete="username"
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              className={brandInputClassName}
               maxLength={25}
               onChange={(event) => handleUsernameChange(event.target.value)}
               placeholder="@username"
@@ -611,13 +695,13 @@ function ProfileDialog({
           </label>
 
           {(validationError || mutation.error) && (
-            <p className="text-sm text-[var(--danger)]">
+            <p className={brandDangerNoticeClassName}>
               {validationError ?? errorMessage(mutation.error)}
             </p>
           )}
 
           <button
-            className="h-9 rounded-xl bg-[var(--accent)] px-3 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
+            className={brandPrimaryButtonClassName}
             disabled={mutation.isPending || normalizedUsername === currentUsername}
           >
             {mutation.isPending ? 'Сохраняю...' : 'Сохранить ник'}
@@ -758,38 +842,43 @@ function ChatSidebar({
   }, [queryClient, socket]);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r border-[var(--border)] bg-[var(--panel)] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-[var(--muted)]">Чаты</p>
-          <p className="text-xs text-[var(--muted)]">Личные и общие в одном списке</p>
+    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r brand-divider bg-[linear-gradient(180deg,rgba(14,15,18,0.98),rgba(8,9,11,0.98))] p-4">
+      <div className="mb-4 brand-card px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <GoidaLogo
+              className="block max-w-[220px]"
+              imageClassName="h-auto w-full object-contain"
+              variant="lockup"
+            />
+            <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
+              Личные чаты, комнаты и голосовые сессии в одном аккуратном контуре.
+            </p>
+          </div>
+          <button className={brandGhostButtonClassName} onClick={onSignOut} type="button">
+            Выйти
+          </button>
         </div>
-        <button
-          className="text-xs text-[var(--muted)] hover:text-[var(--text)]"
-          onClick={onSignOut}
-          type="button"
-        >
-          Выйти
-        </button>
       </div>
 
-      <div className="shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="text-sm text-[var(--muted)]">Поиск @username</p>
-          <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--muted)]">
-            чат
-          </span>
+      <div className="brand-surface shrink-0 p-3">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div>
+            <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Search</p>
+            <p className="mt-1 text-sm text-[var(--muted-strong)]">Поиск @username</p>
+          </div>
+          <span className="brand-pill text-[10px]">чат</span>
         </div>
 
         <input
-          className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          className={brandInputCompactClassName}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Напиши ник"
           value={search}
         />
 
         {normalizedSearch.length >= 3 && (
-          <div className="app-scrollbar mt-2 max-h-48 overflow-y-auto overflow-x-hidden rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
+          <div className="brand-surface-muted app-scrollbar mt-3 max-h-48 overflow-y-auto overflow-x-hidden p-2">
             <UserSearchResults
               actionLabel="Создать"
               disabledUsername={null}
@@ -807,14 +896,14 @@ function ChatSidebar({
         )}
       </div>
 
-      <form
-        className="mt-3 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3"
-        onSubmit={createGroup}
-      >
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-sm text-[var(--muted)]">Новая комната</p>
+      <form className="brand-surface mt-3 shrink-0 p-3" onSubmit={createGroup}>
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div>
+            <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Create room</p>
+            <p className="mt-1 text-sm text-[var(--muted-strong)]">Новая комната</p>
+          </div>
           <button
-            className="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)]"
+            className="brand-link text-xs"
             onClick={() => setGroupTitle(randomRoomTitle())}
             type="button"
           >
@@ -823,20 +912,20 @@ function ChatSidebar({
         </div>
 
         <input
-          className="mb-2 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          className={`${brandInputCompactClassName} mb-2`}
           onChange={(event) => setGroupTitle(event.target.value)}
           placeholder="Название комнаты"
           value={groupTitle}
         />
         <input
-          className="mb-2 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          className={`${brandInputCompactClassName} mb-3`}
           onChange={(event) => setGroupMembers(event.target.value)}
           placeholder="@user1, @user2"
           value={groupMembers}
         />
 
         <button
-          className="h-9 w-full rounded-xl bg-[var(--accent)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
+          className={`${brandPrimaryButtonCompactClassName} w-full`}
           disabled={groupMutation.isPending}
         >
           {groupMutation.isPending ? 'Создаю...' : 'Создать комнату'}
@@ -848,12 +937,19 @@ function ChatSidebar({
       </form>
 
       <div className="app-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
-        {actionError && (
-          <p className="mb-3 rounded-xl border border-red-900 bg-red-950/40 px-3 py-2 text-xs text-red-200">
-            {actionError}
-          </p>
+        {actionError && <p className={`mb-3 ${brandDangerNoticeClassName}`}>{actionError}</p>}
+        {chats.length === 0 && (
+          <div className="brand-surface mt-6 grid place-items-center px-4 py-6 text-center">
+            <GoidaLogo
+              className="mb-4 block w-16"
+              imageClassName="h-auto w-full object-contain opacity-90"
+              variant="mark"
+            />
+            <p className="text-sm text-[var(--muted)]">
+              Пока пусто. Создай первый чат или комнату.
+            </p>
+          </div>
         )}
-        {chats.length === 0 && <p className="mt-8 text-sm text-[var(--muted)]">Пока пусто</p>}
 
         {chats.map((chat) => {
           const active = chat.id === selectedChatId;
@@ -891,25 +987,29 @@ function ChatSidebar({
 
           return (
             <div
-              className={`group mb-2 flex items-start gap-2 rounded-2xl border p-2 transition-colors duration-150 ${
+              className={`group mb-2 flex items-start gap-2 rounded-[1.35rem] border p-2 transition-colors duration-150 ${
                 active
-                  ? 'border-[var(--accent)] bg-[var(--accent)]/10'
-                  : 'border-[var(--border)] bg-[var(--panel-2)] hover:bg-[var(--panel)]'
+                  ? 'border-[var(--halo-strong)] bg-white/[0.06] shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_26px_rgba(255,255,255,0.08)]'
+                  : 'border-[var(--border)] bg-[linear-gradient(180deg,rgba(24,26,30,0.98),rgba(15,16,19,0.98))] hover:border-[var(--border-strong)] hover:bg-[linear-gradient(180deg,rgba(28,30,35,1),rgba(18,19,22,1))]'
               }`}
               key={chat.id}
             >
               <button
-                className="min-w-0 flex-1 rounded-xl px-1 py-1 text-left"
+                className="min-w-0 flex-1 rounded-xl px-2 py-1.5 text-left"
                 onClick={() => onSelect(chat.id)}
                 type="button"
               >
                 <div className="mb-1 flex items-center justify-between gap-2">
-                  <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
+                  <p
+                    className={`truncate text-sm font-semibold ${active ? 'text-[var(--text)]' : 'text-[var(--text-soft)]'}`}
+                  >
+                    {chat.displayTitle ?? chat.title ?? 'Чат'}
+                  </p>
                   <div className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
                     {onlineCount > 0 && <span>{onlineCount} online</span>}
                     {lastTime && <span>{lastTime}</span>}
                     {unread > 0 && (
-                      <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-white">
+                      <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[var(--accent-contrast)]">
                         {unread}
                       </span>
                     )}
@@ -922,7 +1022,7 @@ function ChatSidebar({
 
               <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
                 <ChatActionsMenu
-                  buttonClassName="h-8 w-8 rounded-xl bg-transparent"
+                  buttonClassName="h-8 w-8 rounded-xl border-0 bg-transparent shadow-none"
                   items={actionItems}
                 />
               </div>
@@ -931,14 +1031,19 @@ function ChatSidebar({
         })}
       </div>
 
-      <div className="mt-3 shrink-0 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
-        <p className="text-sm text-[var(--muted)]">Профиль</p>
+      <div className="brand-surface mt-3 shrink-0 p-3">
+        <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Profile</p>
         <button
-          className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-[var(--panel)]"
+          className="brand-surface-muted mt-2 w-full px-3 py-3 text-left transition-colors duration-150 hover:border-[var(--border-strong)]"
           onClick={onOpenProfile}
           type="button"
         >
-          @{currentUser.username ?? currentUser.name}
+          <span className="block text-sm font-semibold text-[var(--text)]">
+            @{currentUser.username ?? currentUser.name}
+          </span>
+          <span className="mt-1 block text-xs text-[var(--muted)]">
+            Настройки идентичности и никнейма
+          </span>
         </button>
       </div>
     </aside>
@@ -997,7 +1102,7 @@ function GroupMemberManager({
   }
 
   return (
-    <div className="rounded-3xl border border-[var(--border)] bg-[var(--panel)] p-4 shadow-lg">
+    <div className="brand-card rounded-3xl p-4">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-[var(--text)]">Настройки комнаты</p>
@@ -1005,16 +1110,12 @@ function GroupMemberManager({
             Переименование и приглашения без перезагрузки.
           </p>
         </div>
-        <button
-          className="text-sm text-[var(--muted)] hover:text-[var(--text)]"
-          onClick={onClose}
-          type="button"
-        >
+        <button className={brandGhostButtonClassName} onClick={onClose} type="button">
           Закрыть
         </button>
       </div>
 
-      <div className="mb-4 grid gap-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+      <div className="brand-surface mb-4 grid gap-3 p-3">
         <div className="flex items-center justify-between gap-2">
           <p className="text-sm text-[var(--text)]">Название комнаты</p>
           <span className="text-xs text-[var(--muted)]">{chat.members.length} участников</span>
@@ -1022,13 +1123,13 @@ function GroupMemberManager({
 
         <div className="flex flex-col gap-2 md:flex-row">
           <input
-            className="h-9 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className={`${brandInputCompactClassName} min-w-0 flex-1`}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Переименовать комнату"
             value={title}
           />
           <button
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm transition-colors duration-150 hover:bg-[var(--panel)] disabled:opacity-50"
+            className={brandSecondaryButtonCompactClassName}
             disabled={renamePending}
             onClick={() => void submitRename()}
             type="button"
@@ -1038,7 +1139,7 @@ function GroupMemberManager({
         </div>
       </div>
 
-      <div className="mb-4 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+      <div className="brand-surface mb-4 p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-sm text-[var(--text)]">Сейчас в комнате</p>
           <p className="text-xs text-[var(--muted)]">Участники</p>
@@ -1046,31 +1147,28 @@ function GroupMemberManager({
 
         <div className="flex flex-wrap gap-2">
           {chat.members.map((member) => (
-            <span
-              className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-xs text-[var(--text)]"
-              key={member.id}
-            >
+            <span className="brand-pill text-xs text-[var(--text)]" key={member.id}>
               @{member.user.username ?? member.user.name}
             </span>
           ))}
         </div>
       </div>
 
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
+      <div className="brand-surface p-3">
         <div className="mb-2 flex items-center justify-between gap-2">
           <p className="text-sm text-[var(--text)]">Пригласить людей</p>
           <p className="text-xs text-[var(--muted)]">Поиск и добавление сразу</p>
         </div>
 
         <input
-          className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          className={brandInputCompactClassName}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Поиск @username"
           value={search}
         />
 
         {normalizedSearch.length >= 3 && (
-          <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
+          <div className="brand-surface-muted mt-2 p-2">
             <UserSearchResults
               actionLabel="Добавить"
               disabledUsername={null}
@@ -1228,7 +1326,7 @@ function GroupSettingsModal({
     <div className="fixed inset-0 z-50">
       <button
         aria-label="Закрыть настройки комнаты"
-        className="absolute inset-0 bg-black/60"
+        className="brand-overlay absolute inset-0"
         onClick={onClose}
         type="button"
       />
@@ -1236,21 +1334,22 @@ function GroupSettingsModal({
       <div className="absolute inset-0 flex items-center justify-center p-4">
         <section
           aria-modal="true"
-          className="relative flex w-[min(90vw,520px)] min-w-0 flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--panel)] shadow-[0_30px_80px_rgba(0,0,0,0.45)] sm:min-w-[420px]"
+          className="brand-modal relative flex w-[min(90vw,520px)] min-w-0 flex-col overflow-hidden sm:min-w-[420px]"
           style={{ maxHeight: '85vh' }}
           role="dialog"
         >
-          <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
+          <div className="flex items-start justify-between gap-3 border-b brand-divider px-5 py-4">
             <div className="min-w-0">
-              <h2 className="truncate text-lg font-semibold text-[var(--text)]">
+              <p className="brand-eyebrow text-[11px] text-[var(--muted)]">Room settings</p>
+              <h2 className="brand-display mt-2 truncate text-lg font-semibold text-[var(--text)]">
                 {chat.title ?? chat.displayTitle ?? 'Комната'}
               </h2>
-              <p className="text-sm text-[var(--muted)]">
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
                 Переименование и приглашение участников без перезагрузки.
               </p>
             </div>
             <button
-              className="shrink-0 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 py-2 text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--bg)]"
+              className={brandSecondaryButtonCompactClassName}
               onClick={onClose}
               type="button"
             >
@@ -1261,7 +1360,7 @@ function GroupSettingsModal({
           <div className="app-scrollbar min-h-0 overflow-y-auto px-5 py-4">
             <div className="grid gap-4">
               <form
-                className="grid gap-3 rounded-3xl border border-[var(--border)] bg-[var(--panel-2)] p-4"
+                className="brand-surface grid gap-3 p-4"
                 onSubmit={(event) => void submitRename(event)}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -1275,7 +1374,7 @@ function GroupSettingsModal({
                 </div>
 
                 <input
-                  className="h-10 w-full rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  className={brandInputCompactClassName}
                   maxLength={100}
                   onChange={(event) => handleTitleChange(event.target.value)}
                   placeholder="Переименовать комнату"
@@ -1284,14 +1383,16 @@ function GroupSettingsModal({
 
                 {(renameError || renameSuccess) && (
                   <p
-                    className={`text-sm ${renameError ? 'text-[var(--danger)]' : 'text-[var(--success)]'}`}
+                    className={
+                      renameError ? brandDangerNoticeClassName : brandSuccessNoticeClassName
+                    }
                   >
                     {renameError ?? renameSuccess}
                   </p>
                 )}
 
                 <button
-                  className="h-10 rounded-2xl bg-[var(--accent)] px-4 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
+                  className={brandPrimaryButtonCompactClassName}
                   disabled={
                     renameMutation.isPending ||
                     Boolean(groupTitleError(title)) ||
@@ -1303,7 +1404,7 @@ function GroupSettingsModal({
                 </button>
               </form>
 
-              <section className="grid gap-3 rounded-3xl border border-[var(--border)] bg-[var(--panel-2)] p-4">
+              <section className="brand-surface grid gap-3 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-sm font-medium text-[var(--text)]">Участники</p>
@@ -1314,17 +1415,14 @@ function GroupSettingsModal({
 
                 <div className="flex flex-wrap gap-2">
                   {chat.members.map((member) => (
-                    <span
-                      className="rounded-full border border-[var(--border)] bg-[var(--bg)] px-3 py-1 text-xs text-[var(--text)]"
-                      key={member.id}
-                    >
+                    <span className="brand-pill text-xs text-[var(--text)]" key={member.id}>
                       @{member.user.username ?? member.user.name}
                     </span>
                   ))}
                 </div>
               </section>
 
-              <section className="grid gap-3 rounded-3xl border border-[var(--border)] bg-[var(--panel-2)] p-4">
+              <section className="brand-surface grid gap-3 p-4">
                 <div>
                   <p className="text-sm font-medium text-[var(--text)]">Пригласить по @username</p>
                   <p className="text-xs text-[var(--muted)]">
@@ -1333,7 +1431,7 @@ function GroupSettingsModal({
                 </div>
 
                 <input
-                  className="h-10 w-full rounded-2xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  className={brandInputCompactClassName}
                   disabled={addMemberMutation.isPending}
                   onChange={(event) => handleSearchChange(event.target.value)}
                   placeholder="Поиск @username"
@@ -1341,14 +1439,14 @@ function GroupSettingsModal({
                   value={search}
                 />
 
-                {inviteSuccess && <p className="text-sm text-[var(--success)]">{inviteSuccess}</p>}
+                {inviteSuccess && <p className={brandSuccessNoticeClassName}>{inviteSuccess}</p>}
 
                 {normalizedSearch.length > 0 && normalizedSearch.length < 3 && (
                   <p className="text-sm text-[var(--muted)]">Введи минимум 3 символа.</p>
                 )}
 
                 {normalizedSearch.length >= 3 && (
-                  <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg)] p-2">
+                  <div className="brand-surface-muted p-2">
                     <UserSearchResults
                       actionLabel={addMemberMutation.isPending ? 'Добавляю...' : 'Добавить'}
                       disabledUsername={null}
@@ -1633,11 +1731,11 @@ function ChatView({
   }
 
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--bg)]">
-      <header className="flex min-h-[72px] shrink-0 items-center justify-between border-b border-[var(--border)] px-4 md:px-5">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,0.98),rgba(5,5,7,0.98))]">
+      <header className="flex min-h-[78px] shrink-0 items-center justify-between border-b brand-divider px-4 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <button
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
+            className={`${brandSecondaryButtonCompactClassName} md:hidden`}
             onClick={onOpenSidebar}
             type="button"
           >
@@ -1645,7 +1743,9 @@ function ChatView({
           </button>
 
           <div className="min-w-0">
-            <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
+            <p className="brand-display truncate text-lg font-semibold text-[var(--text)]">
+              {chat.displayTitle ?? chat.title ?? 'Чат'}
+            </p>
             <p className="text-xs text-[var(--muted)]">{chat.members.length} участник(ов)</p>
           </div>
         </div>
@@ -1653,7 +1753,7 @@ function ChatView({
         <div className="flex items-center gap-2">
           {chat.type === 'group' && (
             <button
-              className="hidden h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)] md:inline-flex md:items-center"
+              className={`hidden md:inline-flex md:items-center ${brandSecondaryButtonCompactClassName}`}
               onClick={() => setRoomPanelOpen(true)}
               type="button"
             >
@@ -1664,7 +1764,7 @@ function ChatView({
           <ChatActionsMenu items={chatActions} />
 
           <button
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
+            className={`${brandSecondaryButtonCompactClassName} md:hidden`}
             onClick={onBack}
             type="button"
           >
@@ -1674,15 +1774,15 @@ function ChatView({
       </header>
 
       {actionError && (
-        <div className="border-b border-[var(--border)] bg-red-950/30 px-4 py-3 text-sm text-red-200 md:px-5">
-          {actionError}
+        <div className="border-b brand-divider px-4 py-3 md:px-5">
+          <p className={brandDangerNoticeClassName}>{actionError}</p>
         </div>
       )}
 
       <div className="min-w-0 shrink-0">
         <Suspense
           fallback={
-            <div className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
+            <div className="border-b brand-divider px-4 py-3 text-sm text-[var(--muted)]">
               Голос...
             </div>
           }
@@ -1702,13 +1802,23 @@ function ChatView({
           )}
 
           {messages.length === 0 && !messagesQuery.isPending && (
-            <p className="text-center text-sm text-[var(--muted)]">Пока пусто. Напиши первым.</p>
+            <div className="brand-surface grid place-items-center px-5 py-10 text-center">
+              <GoidaLogo
+                className="mb-4 block w-20"
+                imageClassName="h-auto w-full object-contain opacity-90"
+                variant="mark"
+              />
+              <p className="brand-display text-lg text-[var(--text)]">Пока пусто</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted)]">
+                Напиши первым и задай тон разговору в новой брендированной комнате Goida Chat.
+              </p>
+            </div>
           )}
 
           {nextCursor && (
             <div className="mb-3 flex justify-center">
               <button
-                className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-xs text-[var(--text)]"
+                className={`${brandSecondaryButtonCompactClassName} text-xs`}
                 onClick={() => void loadOlderMessages()}
                 type="button"
               >
@@ -1717,7 +1827,7 @@ function ChatView({
             </div>
           )}
 
-          <div className="min-w-0 divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
+          <div className="brand-card min-w-0 divide-y divide-[var(--border)] overflow-hidden">
             {messages.map((message) => {
               const own = message.userId === currentUserId;
 
@@ -1745,7 +1855,7 @@ function ChatView({
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-[var(--border)] bg-[var(--panel)] p-3">
+      <footer className="shrink-0 border-t brand-divider bg-[rgba(11,12,15,0.92)] p-3">
         {error && <p className="mb-2 text-sm text-[var(--danger)]">{error}</p>}
         {typingUsers.length > 0 && (
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
@@ -1753,15 +1863,13 @@ function ChatView({
 
         <form className="flex items-stretch gap-2 max-sm:flex-col sm:flex-row" onSubmit={send}>
           <input
-            className="h-11 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className={`${brandInputClassName} min-w-0 flex-1`}
             maxLength={4000}
             onChange={(event) => setText(event.target.value)}
             placeholder="Написать сообщение..."
             value={text}
           />
-          <button className="h-11 shrink-0 rounded-xl bg-[var(--accent)] px-4 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)]">
-            Отправить
-          </button>
+          <button className={`${brandPrimaryButtonClassName} shrink-0`}>Отправить</button>
         </form>
       </footer>
 
@@ -1822,10 +1930,8 @@ function ChatLayout() {
       error: null,
     }),
   );
-  const {
-    remoteParticipantVolumes: voiceRemoteParticipantVolumes,
-    setRemoteParticipantVolume,
-  } = usePersistentPeerVolumes(baseUser?.id ?? null);
+  const { remoteParticipantVolumes: voiceRemoteParticipantVolumes, setRemoteParticipantVolume } =
+    usePersistentPeerVolumes(baseUser?.id ?? null);
   const { activeDeviceId, devices, setMicDeviceId } = useAudioDevices();
   const activeVoiceChatIdRef = useRef<string | null>(null);
   const voicePresenceChatIdRef = useRef<string | null>(null);
@@ -2064,7 +2170,11 @@ function ChatLayout() {
       return;
     }
 
-    if (currentVoiceChatId && currentVoiceChatId !== chat.id && (voiceSession || voiceConnectEnabled)) {
+    if (
+      currentVoiceChatId &&
+      currentVoiceChatId !== chat.id &&
+      (voiceSession || voiceConnectEnabled)
+    ) {
       const confirmed = window.confirm('Вы уже в другом звонке. Перейти?');
       if (!confirmed) return;
 
@@ -2174,23 +2284,34 @@ function ChatLayout() {
     />
   ) : (
     <section className="grid h-full min-h-0 place-items-center overflow-hidden px-4 text-center">
-      <div className="grid gap-3">
-        <p className="text-sm text-[var(--muted)]">
-          {activeVoiceChat
-            ? `Звонок в ${activeVoiceChat.displayTitle ?? activeVoiceChat.title ?? 'комнате'} всё ещё активен.`
-            : 'Выбери чат или создай новый.'}
-        </p>
+      <div className="brand-card grid max-w-lg gap-4 px-6 py-8">
+        <GoidaLogo
+          className="mx-auto block w-20"
+          imageClassName="h-auto w-full object-contain"
+          variant="mark"
+        />
+        <div>
+          <p className="brand-eyebrow text-[11px] text-[var(--muted)]">Goida workspace</p>
+          <p className="brand-display mt-3 text-2xl font-semibold text-[var(--text)]">
+            {activeVoiceChat ? 'Звонок всё ещё активен' : 'Выбери чат или создай новый'}
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+            {activeVoiceChat
+              ? `Сессия в ${activeVoiceChat.displayTitle ?? activeVoiceChat.title ?? 'комнате'} ждёт тебя и не прерывается.`
+              : 'Слева уже готов список диалогов, комнат и быстрых действий. Выбери нужный контур и продолжай разговор.'}
+          </p>
+        </div>
         {activeVoiceChat && (
           <button
-            className="h-10 rounded-xl bg-[var(--accent)] px-4 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)]"
+            className={brandPrimaryButtonClassName}
             onClick={() => setSelectedChatId(activeVoiceChat.id)}
             type="button"
           >
-            К войсу
+            К звонку
           </button>
         )}
         <button
-          className="h-10 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 text-sm text-[var(--text)] md:hidden"
+          className={`${brandSecondaryButtonClassName} md:hidden`}
           onClick={() => setSidebarOpen(true)}
           type="button"
         >
@@ -2199,42 +2320,43 @@ function ChatLayout() {
       </div>
     </section>
   );
-  const rightPane = voiceSession && activeVoiceChatId ? (
-    <LiveKitRoom
-      audio={buildAudioCaptureOptions(voiceCaptureOptions)}
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
-      connect={voiceConnectEnabled}
-      connectOptions={{ autoSubscribe: true, maxRetries: 12 }}
-      onConnected={handleVoiceConnected}
-      onDisconnected={handleVoiceDisconnected}
-      onError={(nextError) => setVoiceError(nextError.message)}
-      options={{
-        adaptiveStream: true,
-        audioCaptureDefaults: buildAudioCaptureOptions(voiceCaptureOptions),
-        dynacast: true,
-        stopLocalTrackOnUnpublish: false,
-      }}
-      serverUrl={voiceSession.url}
-      token={voiceSession.token}
-      video={false}
-    >
-      <ConnectedVoiceRuntime
-        activeDeviceId={activeDeviceId}
-        capturePreferences={voiceCapturePreferences}
-        deafened={voiceDeafened}
-        noiseSuppressionMode={noiseSuppressionMode}
-        onNoiseSuppressionStateChange={setNoiseSuppressionState}
-        onError={setVoiceError}
-      />
-      {rightPaneContent}
-    </LiveKitRoom>
-  ) : (
-    rightPaneContent
-  );
+  const rightPane =
+    voiceSession && activeVoiceChatId ? (
+      <LiveKitRoom
+        audio={buildAudioCaptureOptions(voiceCaptureOptions)}
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+        connect={voiceConnectEnabled}
+        connectOptions={{ autoSubscribe: true, maxRetries: 12 }}
+        onConnected={handleVoiceConnected}
+        onDisconnected={handleVoiceDisconnected}
+        onError={(nextError) => setVoiceError(nextError.message)}
+        options={{
+          adaptiveStream: true,
+          audioCaptureDefaults: buildAudioCaptureOptions(voiceCaptureOptions),
+          dynacast: true,
+          stopLocalTrackOnUnpublish: false,
+        }}
+        serverUrl={voiceSession.url}
+        token={voiceSession.token}
+        video={false}
+      >
+        <ConnectedVoiceRuntime
+          activeDeviceId={activeDeviceId}
+          capturePreferences={voiceCapturePreferences}
+          deafened={voiceDeafened}
+          noiseSuppressionMode={noiseSuppressionMode}
+          onNoiseSuppressionStateChange={setNoiseSuppressionState}
+          onError={setVoiceError}
+        />
+        {rightPaneContent}
+      </LiveKitRoom>
+    ) : (
+      rightPaneContent
+    );
 
   return (
     <>
-      <main className="grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[var(--bg)] md:grid-cols-[320px_1fr]">
+      <main className="grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] md:grid-cols-[320px_1fr]">
         <div className="hidden min-h-0 overflow-hidden md:block">
           <ChatSidebar
             chats={chats}
@@ -2255,7 +2377,7 @@ function ChatLayout() {
         <div className="fixed inset-0 z-40 overflow-hidden md:hidden">
           <button
             aria-label="Закрыть список чатов"
-            className="absolute inset-0 bg-black/60"
+            className="brand-overlay absolute inset-0"
             onClick={() => setSidebarOpen(false)}
             type="button"
           />

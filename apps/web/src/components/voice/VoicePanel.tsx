@@ -38,10 +38,7 @@ function VoiceAudioBridge({
     [activeDeviceId, capturePreferences, noiseSuppressionMode],
   );
 
-  const signature = useMemo(
-    () => JSON.stringify(captureOptions),
-    [captureOptions],
-  );
+  const signature = useMemo(() => JSON.stringify(captureOptions), [captureOptions]);
 
   useEffect(() => {
     if (userMuted) {
@@ -214,7 +211,7 @@ function ConnectedVoiceStage({
 
       {(error || noiseSuppressionState.error) && (
         <div className="px-4 pb-4 md:px-6">
-          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+          <div className="rounded-2xl border border-amber-500/28 bg-amber-500/12 px-4 py-3 text-sm text-amber-100">
             {error ?? noiseSuppressionState.error}
           </div>
         </div>
@@ -286,7 +283,7 @@ export function VoicePanel({
   });
   const users = usersQuery.data?.users ?? [];
   const activeVoiceUsers =
-    activeVoiceChat?.id === chat.id ? users : activeVoiceUsersQuery.data?.users ?? [];
+    activeVoiceChat?.id === chat.id ? users : (activeVoiceUsersQuery.data?.users ?? []);
 
   if (isViewingActiveVoiceChat && activeVoiceChat) {
     return (
@@ -318,11 +315,13 @@ export function VoicePanel({
     activeVoiceChat && activeVoiceChat.id !== chat.id ? 'Перейти в звонок' : 'Войти в звонок';
 
   return (
-    <section className="border-b border-[var(--border)] bg-[var(--bg)] px-4 py-4 md:px-6">
+    <section className="border-b brand-divider bg-[var(--bg)] px-4 py-4 md:px-6">
       {activeVoiceChat && activeVoiceChat.id !== chat.id && (
-        <div className="mb-3 flex flex-col gap-3 rounded-[28px] border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
+        <div className="mb-3 flex flex-col gap-3 rounded-[28px] border border-white/14 bg-white/[0.05] px-4 py-4 shadow-[0_0_0_1px_rgba(255,255,255,0.04),0_0_24px_rgba(255,255,255,0.05)] md:flex-row md:items-center md:justify-between md:px-5">
           <div className="min-w-0">
-            <p className="text-sm font-semibold text-[var(--text)]">Активный звонок не прервался</p>
+            <p className="brand-display text-sm font-semibold text-[var(--text)]">
+              Активный звонок не прервался
+            </p>
             <p className="truncate text-sm text-[var(--muted)]">
               {activeVoiceChat.displayTitle ?? activeVoiceChat.title ?? 'Комната'}
               {activeVoiceUsers.length > 0 ? ` · ${activeVoiceUsers.length} в звонке` : ''}
@@ -330,7 +329,7 @@ export function VoicePanel({
           </div>
 
           <button
-            className="h-10 rounded-2xl border border-[var(--border)] bg-[var(--panel)] px-4 text-sm font-medium text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)]"
+            className="brand-button brand-button-secondary h-10 px-4 text-sm"
             onClick={onReturnToVoice}
             type="button"
           >
@@ -339,11 +338,13 @@ export function VoicePanel({
         </div>
       )}
 
-      <div className="flex flex-col gap-4 rounded-[28px] border border-[var(--border)] bg-[var(--panel)] px-4 py-4 shadow-[0_24px_70px_rgba(0,0,0,0.25)] md:flex-row md:items-center md:justify-between md:px-5">
+      <div className="brand-card flex flex-col gap-4 rounded-[28px] px-4 py-4 md:flex-row md:items-center md:justify-between md:px-5">
         <div className="min-w-0">
           <div className="mb-1 flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-[var(--text)]">Голосовой канал</p>
-            <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">
+            <p className="brand-display text-sm font-semibold text-[var(--text)]">
+              Голосовой канал
+            </p>
+            <span className="brand-pill text-[11px] text-[var(--muted)]">
               {users.length} внутри
             </span>
           </div>
@@ -355,7 +356,7 @@ export function VoicePanel({
         </div>
 
         <button
-          className="h-10 rounded-2xl bg-[var(--accent)] px-4 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="brand-button brand-button-primary h-10 px-4 text-sm disabled:opacity-60"
           disabled={isVoiceJoinPending}
           onClick={() => onJoinVoice(chat)}
           type="button"

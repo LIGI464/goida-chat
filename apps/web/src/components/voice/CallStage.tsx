@@ -132,15 +132,16 @@ export function CallStage({
   });
 
   return (
-    <section className="shrink-0 min-w-0 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-3 md:px-6">
-      <div className="relative overflow-hidden rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(15,22,36,0.98),rgba(9,14,23,0.98))] shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
-        <div className="flex flex-col gap-3 border-b border-[var(--border)] px-4 py-3.5 md:px-5 xl:flex-row xl:items-start xl:justify-between">
+    <section className="shrink-0 min-w-0 border-b brand-divider bg-[var(--bg)] px-4 py-3 md:px-6">
+      <div className="brand-card relative overflow-hidden rounded-[28px]">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_30%),linear-gradient(140deg,rgba(255,255,255,0.02),transparent_45%)]" />
+        <div className="relative flex flex-col gap-3 border-b brand-divider px-4 py-3.5 md:px-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex flex-wrap items-center gap-2">
-              <p className="truncate text-base font-semibold text-[var(--text)]">
+              <p className="brand-display truncate text-base font-semibold text-[var(--text)]">
                 {chat.displayTitle ?? chat.title ?? 'Комната'}
               </p>
-              <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[11px] text-[var(--muted)]">
+              <span className="brand-pill text-[11px] text-[var(--muted)]">
                 {participants.length} в звонке
               </span>
             </div>

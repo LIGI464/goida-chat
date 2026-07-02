@@ -9,17 +9,18 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon.png', 'brand/goida-mark.svg'],
       manifest: {
         name: 'Goida Chat',
         short_name: 'Goida',
-        description: 'Private chat with persistent voice and video rooms',
-        theme_color: '#111827',
-        background_color: '#030712',
+        description: 'Premium private chat with persistent voice and room sessions',
+        theme_color: '#090909',
+        background_color: '#040404',
         display: 'standalone',
         start_url: '/',
         icons: [
-          { src: '/pwa-192x192.svg', sizes: '192x192', type: 'image/svg+xml' },
-          { src: '/pwa-512x512.svg', sizes: '512x512', type: 'image/svg+xml' },
+          { src: '/pwa-192.png', sizes: '192x192', type: 'image/png' },
+          { src: '/pwa-512.png', sizes: '512x512', type: 'image/png' },
         ],
       },
     }),

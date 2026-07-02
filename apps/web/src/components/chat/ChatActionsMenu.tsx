@@ -60,7 +60,7 @@ export function ChatActionsMenu({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-label={MENU_BUTTON_LABEL}
-        className={`grid h-9 w-9 place-items-center rounded-xl border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)] outline-none transition-colors duration-150 hover:bg-[var(--panel-2)] focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${buttonClassName}`}
+        className={`brand-button brand-button-secondary grid h-9 w-9 place-items-center rounded-xl p-0 text-sm outline-none focus-visible:ring-2 focus-visible:ring-white/15 ${buttonClassName}`}
         onClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -83,7 +83,7 @@ export function ChatActionsMenu({
 
       {open && (
         <div
-          className={`absolute top-11 z-30 min-w-52 rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-1 shadow-2xl ${
+          className={`brand-modal absolute top-11 z-30 min-w-52 p-1 ${
             align === 'right' ? 'right-0' : 'left-0'
           }`}
           onClick={(event) => event.stopPropagation()}
@@ -94,8 +94,8 @@ export function ChatActionsMenu({
             <button
               className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-sm transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50 ${
                 item.tone === 'danger'
-                  ? 'text-red-300 hover:bg-red-500/10'
-                  : 'text-[var(--text)] hover:bg-white/5'
+                  ? 'text-red-300 hover:bg-red-500/12'
+                  : 'text-[var(--text)] hover:bg-white/[0.06]'
               }`}
               disabled={item.disabled}
               key={item.label}
