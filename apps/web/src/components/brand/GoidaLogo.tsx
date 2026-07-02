@@ -1,7 +1,7 @@
 const ASSET_BY_VARIANT = {
-  lockup: '/brand/goida-lockup.svg',
-  mark: '/brand/goida-mark.svg',
-  wordmark: '/brand/goida-wordmark.svg',
+  lockup: '/brand/goida-wordmark-ui.png',
+  mark: '/brand/goida-icon-original.png',
+  wordmark: '/brand/goida-wordmark-ui.png',
 } as const;
 
 export function GoidaLogo({

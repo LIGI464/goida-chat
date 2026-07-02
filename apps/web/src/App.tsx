@@ -423,7 +423,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
       navigate(from, { replace: true });
     } catch (caught) {
       if (caught instanceof z.ZodError) {
-        setError(caught.issues[0]?.message ?? 'Проверь введённые данные');
+        setError(caught.issues[0]?.message ?? 'Check the form fields.');
       } else {
         setError(errorMessage(caught));
       }
@@ -439,36 +439,34 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.09),transparent_28%),linear-gradient(140deg,rgba(255,255,255,0.03),transparent_42%)]" />
           <div className="relative">
             <div className="brand-pill brand-eyebrow mb-6 text-[11px] text-[var(--muted-strong)]">
-              Premium private messaging
+              Goida Chat
             </div>
             <GoidaLogo
-              className="block max-w-[360px]"
+              className="block max-w-[430px]"
               imageClassName="h-auto w-full object-contain"
               variant="lockup"
             />
             <h1 className="brand-display mt-10 max-w-lg text-4xl leading-[1.05] font-semibold text-[var(--text)] xl:text-5xl">
-              Строгий dark UI для приватных чатов, комнат и голосовых сессий.
+              Private chats, rooms, and voice sessions without extra noise.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-[var(--muted-strong)]">
-              Новый визуальный язык Goida Chat построен вокруг холодного металла, мягкого halo и
-              спокойной типографики без лишнего шума.
+              Messages, quick rooms, and voice in one calm workspace.
             </p>
           </div>
 
           <div className="relative grid gap-3 xl:max-w-[480px]">
             <div className="brand-surface px-5 py-4">
               <p className="brand-display text-sm font-semibold text-[var(--text)]">
-                Rooms, calls, identity
+                Everything in one place
               </p>
               <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                Личный профиль, быстрые комнаты и независимые voice-сессии остаются на месте, только
-                теперь в цельной брендинговой системе.
+                Jump back into your rooms, messages, and voice sessions without extra steps.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 text-xs text-[var(--muted-strong)]">
-              <span className="brand-pill">Silver glow</span>
-              <span className="brand-pill">Minimal dark surfaces</span>
-              <span className="brand-pill">Readable UI hierarchy</span>
+              <span className="brand-pill">Private rooms</span>
+              <span className="brand-pill">Voice sessions</span>
+              <span className="brand-pill">Keep it simple</span>
             </div>
           </div>
         </div>
@@ -477,27 +475,22 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
           <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center">
             <div className="mb-8 lg:hidden">
               <GoidaLogo
-                className="mb-5 block w-20"
+                className="block max-w-[270px]"
                 imageClassName="h-auto w-full object-contain"
-                variant="mark"
-              />
-              <GoidaLogo
-                className="block max-w-[240px]"
-                imageClassName="h-auto w-full object-contain"
-                variant="wordmark"
+                variant="lockup"
               />
             </div>
 
             <div className="brand-eyebrow mb-3 text-[11px] text-[var(--muted)]">
-              {register ? 'Create account' : 'Secure sign in'}
+              {register ? 'Create account' : 'Welcome back'}
             </div>
             <h1 className="brand-display mb-2 text-3xl font-semibold text-[var(--text)]">
-              {register ? 'Регистрация' : 'Вход'}
+              {register ? 'Register' : 'Sign in'}
             </h1>
             <p className="mb-6 text-sm leading-6 text-[var(--muted)]">
               {register
-                ? 'Создай приватный аккаунт и зайди в общий премиальный рабочий контур Goida Chat.'
-                : 'Возвращайся в свои комнаты, сообщения и голосовые сессии без лишней суеты.'}
+                ? 'Create an account and start chatting in rooms and calls.'
+                : 'Return to your chats, rooms, and voice sessions.'}
             </p>
 
             <form className="grid gap-3" onSubmit={submit}>
@@ -530,7 +523,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
                 className={brandInputClassName}
                 minLength={8}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Пароль"
+                placeholder="Password"
                 required
                 type="password"
                 value={password}
@@ -542,7 +535,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
                   className={brandInputClassName}
                   minLength={8}
                   onChange={(event) => setRepeatPassword(event.target.value)}
-                  placeholder="Повтори пароль"
+                  placeholder="Repeat password"
                   required
                   type="password"
                   value={repeatPassword}
@@ -552,7 +545,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
               {error && <p className={brandDangerNoticeClassName}>{error}</p>}
 
               <button className={brandPrimaryButtonClassName} disabled={pending}>
-                {pending ? 'Подожди...' : register ? 'Создать аккаунт' : 'Войти'}
+                {pending ? 'Please wait...' : register ? 'Create account' : 'Sign in'}
               </button>
             </form>
 
@@ -560,7 +553,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
               className="brand-link mt-5 inline-flex w-fit text-sm"
               to={register ? '/login' : '/register'}
             >
-              {register ? 'Уже есть аккаунт' : 'Создать аккаунт'}
+              {register ? 'Already have an account' : 'Create account'}
             </Link>
           </div>
         </div>
@@ -847,16 +840,16 @@ function ChatSidebar({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <GoidaLogo
-              className="block max-w-[220px]"
+              className="block max-w-[260px]"
               imageClassName="h-auto w-full object-contain"
               variant="lockup"
             />
             <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-              Личные чаты, комнаты и голосовые сессии в одном аккуратном контуре.
+              Private chats, rooms, and voice sessions in one tidy space.
             </p>
           </div>
           <button className={brandGhostButtonClassName} onClick={onSignOut} type="button">
-            Выйти
+            Sign out
           </button>
         </div>
       </div>
@@ -907,7 +900,7 @@ function ChatSidebar({
             onClick={() => setGroupTitle(randomRoomTitle())}
             type="button"
           >
-            рандом
+            Random
           </button>
         </div>
 
@@ -1733,43 +1726,19 @@ function ChatView({
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,0.98),rgba(5,5,7,0.98))]">
       <header className="flex min-h-[78px] shrink-0 items-center justify-between border-b brand-divider px-4 md:px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            className={`${brandSecondaryButtonCompactClassName} md:hidden`}
-            onClick={onOpenSidebar}
-            type="button"
-          >
-            Чаты
-          </button>
+        <button
+          className="min-w-0 flex-1 rounded-2xl text-left outline-none md:cursor-default"
+          onClick={onOpenSidebar}
+          type="button"
+        >
+          <p className="brand-display truncate text-lg font-semibold text-[var(--text)]">
+            {chat.displayTitle ?? chat.title ?? 'Chat'}
+          </p>
+          <p className="text-xs text-[var(--muted)]">{chat.members.length} members</p>
+        </button>
 
-          <div className="min-w-0">
-            <p className="brand-display truncate text-lg font-semibold text-[var(--text)]">
-              {chat.displayTitle ?? chat.title ?? 'Чат'}
-            </p>
-            <p className="text-xs text-[var(--muted)]">{chat.members.length} участник(ов)</p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {chat.type === 'group' && (
-            <button
-              className={`hidden md:inline-flex md:items-center ${brandSecondaryButtonCompactClassName}`}
-              onClick={() => setRoomPanelOpen(true)}
-              type="button"
-            >
-              Пригласить
-            </button>
-          )}
-
+        <div className="ml-4 flex shrink-0 items-center">
           <ChatActionsMenu items={chatActions} />
-
-          <button
-            className={`${brandSecondaryButtonCompactClassName} md:hidden`}
-            onClick={onBack}
-            type="button"
-          >
-            Назад
-          </button>
         </div>
       </header>
 
@@ -1810,7 +1779,7 @@ function ChatView({
               />
               <p className="brand-display text-lg text-[var(--text)]">Пока пусто</p>
               <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted)]">
-                Напиши первым и задай тон разговору в новой брендированной комнате Goida Chat.
+                Write the first message and start the conversation.
               </p>
             </div>
           )}
@@ -2356,7 +2325,7 @@ function ChatLayout() {
 
   return (
     <>
-      <main className="grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] md:grid-cols-[320px_1fr]">
+      <main className="grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] md:grid-cols-[352px_1fr]">
         <div className="hidden min-h-0 overflow-hidden md:block">
           <ChatSidebar
             chats={chats}
@@ -2381,7 +2350,7 @@ function ChatLayout() {
             onClick={() => setSidebarOpen(false)}
             type="button"
           />
-          <div className="absolute inset-y-0 left-0 h-full w-[min(88vw,320px)] overflow-hidden">
+          <div className="absolute inset-y-0 left-0 h-full w-[min(88vw,352px)] overflow-hidden">
             <ChatSidebar
               chats={chats}
               currentUser={currentUser}

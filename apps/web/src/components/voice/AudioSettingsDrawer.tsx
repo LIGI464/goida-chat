@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   NOISE_SUPPRESSION_MODES,
@@ -11,10 +11,11 @@ import {
   MAX_VOICE_PEER_VOLUME,
   MIN_VOICE_PEER_VOLUME,
 } from '../../features/voice/audio/usePersistentPeerVolumes';
+import { AnchoredPopover } from '../ui/AnchoredPopover';
 
 function SelectChevron() {
   return (
-    <span className="pointer-events-none absolute inset-y-0 right-4 flex items-center text-[var(--muted)]">
+    <span className="pointer-events-none flex items-center text-[var(--muted)]">
       <svg
         aria-hidden="true"
         className="h-4 w-4"
@@ -31,6 +32,126 @@ function SelectChevron() {
         />
       </svg>
     </span>
+  );
+}
+
+type BrandSelectOption = {
+  value: string;
+  label: string;
+  description?: string;
+};
+
+function BrandSelect({
+  ariaLabel,
+  options,
+  value,
+  onChange,
+}: {
+  ariaLabel: string;
+  options: BrandSelectOption[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const selected = options.find((option) => option.value === value) ?? options[0] ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (!buttonRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setOpen(false);
+      }
+    };
+
+    window.addEventListener('mousedown', onPointerDown);
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      window.removeEventListener('mousedown', onPointerDown);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        aria-expanded={open}
+        aria-haspopup="listbox"
+        aria-label={ariaLabel}
+        className="brand-input flex h-11 w-full min-w-0 items-center justify-between gap-3 px-3 text-left text-sm leading-5 text-[var(--text)]"
+        onClick={() => setOpen((current) => !current)}
+        onPointerDown={(event) => event.stopPropagation()}
+        ref={buttonRef}
+        type="button"
+      >
+        <span className="min-w-0 truncate">{selected?.label ?? ariaLabel}</span>
+        <SelectChevron />
+      </button>
+
+      <AnchoredPopover
+        anchorRef={buttonRef}
+        className="brand-modal w-[min(32rem,calc(100vw-1.5rem))] overflow-hidden p-1"
+        matchAnchorWidth
+        maxWidth={520}
+        minWidth={0}
+        open={open}
+        surfaceRef={menuRef}
+        zIndex={110}
+      >
+        <div
+          className="app-scrollbar max-h-[min(18rem,55vh)] overflow-y-auto"
+          onClick={(event) => event.stopPropagation()}
+          onPointerDown={(event) => event.stopPropagation()}
+          role="listbox"
+        >
+          {options.map((option) => {
+            const active = option.value === value;
+
+            return (
+              <button
+                aria-selected={active}
+                className={`flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150 ${
+                  active
+                    ? 'bg-white/[0.08] text-[var(--text)]'
+                    : 'text-[var(--text-soft)] hover:bg-white/[0.05] hover:text-[var(--text)]'
+                }`}
+                key={option.value}
+                onClick={() => {
+                  setOpen(false);
+                  onChange(option.value);
+                }}
+                role="option"
+                type="button"
+              >
+                <span className="min-w-0">
+                  <span className="block break-words text-sm leading-5">{option.label}</span>
+                  {option.description && (
+                    <span className="mt-1 block text-xs leading-5 text-[var(--muted)]">
+                      {option.description}
+                    </span>
+                  )}
+                </span>
+                {active && (
+                  <span className="shrink-0 text-[11px] uppercase tracking-[0.12em] text-[var(--muted)]">
+                    Выбрано
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </AnchoredPopover>
+    </>
   );
 }
 
@@ -121,6 +242,18 @@ export function AudioSettingsDrawer({
   const enhancedFallback =
     noiseSuppressionMode === 'enhanced' && noiseSuppressionState.effectiveMode !== 'enhanced';
   const browserCleanupLocked = noiseSuppressionMode !== 'off';
+  const microphoneOptions =
+    devices.length === 0
+      ? [{ value: activeDeviceId, label: 'По умолчанию - Системный микрофон' }]
+      : devices.map((device) => ({
+          value: device.deviceId,
+          label: device.label || `Микрофон ${device.deviceId.slice(0, 6)}`,
+        }));
+  const noiseSuppressionOptions = NOISE_SUPPRESSION_MODES.map((mode) => ({
+    description: mode.hint,
+    label: mode.label,
+    value: mode.value,
+  }));
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 md:items-center md:justify-end md:p-6">
@@ -160,45 +293,24 @@ export function AudioSettingsDrawer({
               <span className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--muted)]">
                 Микрофон
               </span>
-              <label className="relative block">
-                <select
-                  className="brand-input h-11 w-full min-w-0 appearance-none px-3 pr-11 text-sm leading-5 text-[var(--text)]"
-                  onChange={(event) => setMicDeviceId(event.target.value)}
-                  value={activeDeviceId}
-                >
-                  {devices.length === 0 ? (
-                    <option value={activeDeviceId}>Системный микрофон</option>
-                  ) : null}
-                  {devices.map((device) => (
-                    <option key={device.deviceId} value={device.deviceId}>
-                      {device.label || `Микрофон ${device.deviceId.slice(0, 6)}`}
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </label>
+              <BrandSelect
+                ariaLabel="Выбор микрофона"
+                onChange={setMicDeviceId}
+                options={microphoneOptions}
+                value={activeDeviceId}
+              />
             </section>
 
             <section className="grid gap-2">
               <span className="text-xs font-medium uppercase tracking-[0.16em] text-[var(--muted)]">
                 Шумодав
               </span>
-              <label className="relative block">
-                <select
-                  className="brand-input h-11 w-full min-w-0 appearance-none px-3 pr-11 text-sm leading-5 text-[var(--text)]"
-                  onChange={(event) =>
-                    setNoiseSuppressionMode(event.target.value as NoiseSuppressionMode)
-                  }
-                  value={noiseSuppressionMode}
-                >
-                  {NOISE_SUPPRESSION_MODES.map((mode) => (
-                    <option key={mode.value} value={mode.value}>
-                      {mode.label}
-                    </option>
-                  ))}
-                </select>
-                <SelectChevron />
-              </label>
+              <BrandSelect
+                ariaLabel="Выбор режима шумоподавления"
+                onChange={(nextValue) => setNoiseSuppressionMode(nextValue as NoiseSuppressionMode)}
+                options={noiseSuppressionOptions}
+                value={noiseSuppressionMode}
+              />
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 <span className="rounded-full border border-[var(--border)] bg-black/10 px-2.5 py-1 text-[var(--text)]">
                   {activeMode?.label ?? 'Off'}

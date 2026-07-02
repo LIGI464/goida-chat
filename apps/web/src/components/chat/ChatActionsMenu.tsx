@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 
+import { AnchoredPopover } from '../ui/AnchoredPopover';
+
 export type ChatActionItem = {
   label: string;
   onSelect: () => void;
@@ -20,14 +22,16 @@ export function ChatActionsMenu({
   align?: 'left' | 'right';
 }) {
   const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
   const visibleItems = items.filter((item) => !item.hidden);
 
   useEffect(() => {
     if (!open) return;
 
     const onPointerDown = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      const target = event.target as Node;
+      if (!buttonRef.current?.contains(target) && !menuRef.current?.contains(target)) {
         setOpen(false);
       }
     };
@@ -50,12 +54,7 @@ export function ChatActionsMenu({
   if (visibleItems.length === 0) return null;
 
   return (
-    <div
-      className="relative"
-      onClick={(event) => event.stopPropagation()}
-      onPointerDown={(event) => event.stopPropagation()}
-      ref={rootRef}
-    >
+    <div className="relative" onClick={(event) => event.stopPropagation()}>
       <button
         aria-expanded={open}
         aria-haspopup="menu"
@@ -66,6 +65,8 @@ export function ChatActionsMenu({
           event.stopPropagation();
           setOpen((value) => !value);
         }}
+        onPointerDown={(event) => event.stopPropagation()}
+        ref={buttonRef}
         title={MENU_BUTTON_LABEL}
         type="button"
       >
@@ -81,11 +82,17 @@ export function ChatActionsMenu({
         </svg>
       </button>
 
-      {open && (
+      <AnchoredPopover
+        align={align}
+        anchorRef={buttonRef}
+        className="brand-modal w-[min(22rem,calc(100vw-1.5rem))] overflow-hidden p-1"
+        maxWidth={352}
+        open={open}
+        surfaceRef={menuRef}
+        zIndex={90}
+      >
         <div
-          className={`brand-modal absolute top-11 z-30 min-w-52 p-1 ${
-            align === 'right' ? 'right-0' : 'left-0'
-          }`}
+          className="app-scrollbar grid max-h-[min(60vh,18rem)] gap-0.5 overflow-y-auto"
           onClick={(event) => event.stopPropagation()}
           onPointerDown={(event) => event.stopPropagation()}
           role="menu"
@@ -113,7 +120,7 @@ export function ChatActionsMenu({
             </button>
           ))}
         </div>
-      )}
+      </AnchoredPopover>
     </div>
   );
 }
