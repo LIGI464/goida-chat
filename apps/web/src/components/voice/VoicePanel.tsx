@@ -224,7 +224,13 @@ function ConnectedVoiceStage({
         users={users}
       />
 
-      {error && <p className="px-4 pb-4 text-sm text-[var(--danger)] md:px-6">{error}</p>}
+      {error && (
+        <div className="px-4 pb-4 md:px-6">
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            {error}
+          </div>
+        </div>
+      )}
     </>
   );
 }

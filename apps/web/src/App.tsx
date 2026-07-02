@@ -1632,7 +1632,7 @@ function ChatView({
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--bg)]">
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[var(--bg)]">
       <header className="flex min-h-[72px] shrink-0 items-center justify-between border-b border-[var(--border)] px-4 md:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <button
@@ -1678,7 +1678,7 @@ function ChatView({
         </div>
       )}
 
-      <div className="shrink-0">
+      <div className="min-w-0 shrink-0">
         <Suspense
           fallback={
             <div className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
@@ -1690,9 +1690,9 @@ function ChatView({
         </Suspense>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-6">
+      <div className="flex min-h-0 flex-1 min-w-0 flex-col overflow-hidden px-4 py-4 md:px-6">
         <div
-          className="app-scrollbar min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+          className="app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
           onScroll={handleMessagesScroll}
           ref={messagesScrollerRef}
         >
@@ -1716,7 +1716,7 @@ function ChatView({
             </div>
           )}
 
-          <div className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
+          <div className="min-w-0 divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
             {messages.map((message) => {
               const own = message.userId === currentUserId;
 
@@ -1750,15 +1750,15 @@ function ChatView({
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
         )}
 
-        <form className="flex gap-2" onSubmit={send}>
+        <form className="flex items-stretch gap-2 max-sm:flex-col sm:flex-row" onSubmit={send}>
           <input
-            className="h-10 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className="h-11 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
             maxLength={4000}
             onChange={(event) => setText(event.target.value)}
             placeholder="Написать сообщение..."
             value={text}
           />
-          <button className="h-10 rounded-xl bg-[var(--accent)] px-4 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)]">
+          <button className="h-11 shrink-0 rounded-xl bg-[var(--accent)] px-4 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)]">
             Отправить
           </button>
         </form>
@@ -2190,6 +2190,7 @@ function ChatLayout() {
   const rightPane = voiceSession && activeVoiceChatId ? (
     <LiveKitRoom
       audio={buildAudioCaptureOptions(voiceCaptureOptions)}
+      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
       connect={voiceConnectEnabled}
       connectOptions={{ autoSubscribe: true, maxRetries: 12 }}
       onConnected={handleVoiceConnected}

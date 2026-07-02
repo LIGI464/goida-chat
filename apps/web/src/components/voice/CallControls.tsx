@@ -12,7 +12,7 @@ function tone(active: boolean, danger = false) {
 }
 
 const controlClassName =
-  'inline-flex h-11 min-w-[132px] flex-1 items-center justify-center rounded-2xl border px-4 text-sm font-medium whitespace-nowrap transition-colors duration-150 sm:flex-none';
+  'inline-flex h-10 min-w-[112px] flex-1 items-center justify-center rounded-2xl border px-3.5 text-sm font-medium whitespace-nowrap transition-colors duration-150 sm:flex-none';
 
 export function CallControls({
   deafened,

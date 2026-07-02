@@ -107,10 +107,10 @@ export function CallStage({
   const participantCount = participants.length;
   const stageViewportClass =
     participantCount === 1
-      ? 'min-h-[280px] max-h-[min(48vh,420px)] md:min-h-[320px] md:max-h-[min(52vh,460px)]'
+      ? 'min-h-[220px] max-h-[min(34vh,320px)] md:min-h-[240px] md:max-h-[min(38vh,360px)]'
       : hasCamera
-        ? 'min-h-[320px] max-h-[min(60vh,620px)]'
-        : 'min-h-[320px] max-h-[min(56vh,540px)]';
+        ? 'min-h-[240px] max-h-[min(44vh,420px)]'
+        : 'min-h-[220px] max-h-[min(38vh,360px)]';
   const participantGridClass =
     participantCount === 1
       ? 'mx-auto max-w-[420px] grid-cols-1'
@@ -129,9 +129,9 @@ export function CallStage({
   });
 
   return (
-    <section className="shrink-0 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-4 md:px-6">
+    <section className="shrink-0 min-w-0 border-b border-[var(--border)] bg-[var(--bg)] px-4 py-3 md:px-6">
       <div className="relative overflow-hidden rounded-[28px] border border-[var(--border)] bg-[linear-gradient(180deg,rgba(15,22,36,0.98),rgba(9,14,23,0.98))] shadow-[0_30px_80px_rgba(0,0,0,0.35)]">
-        <div className="flex flex-col gap-4 border-b border-[var(--border)] px-4 py-4 md:px-5 xl:flex-row xl:items-start xl:justify-between">
+        <div className="flex flex-col gap-3 border-b border-[var(--border)] px-4 py-3.5 md:px-5 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex flex-wrap items-center gap-2">
               <p className="truncate text-base font-semibold text-[var(--text)]">
@@ -165,9 +165,9 @@ export function CallStage({
           />
         </div>
 
-        <div className="px-4 pb-4 pt-4 md:px-5">
+        <div className="px-4 pb-4 pt-3 md:px-5">
           <div
-            className={`voice-stage-scroll overflow-y-auto overflow-x-hidden pr-1 ${stageViewportClass}`}
+            className={`voice-stage-scroll min-w-0 overflow-y-auto overflow-x-hidden pr-1 ${stageViewportClass}`}
           >
             <div className={`grid auto-rows-fr gap-3 ${participantGridClass}`}>
               {participants.map((participant) => {
