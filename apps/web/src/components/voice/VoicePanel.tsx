@@ -1,39 +1,46 @@
 import { RoomAudioRenderer, useLocalParticipant } from '@livekit/components-react';
 import { useQuery } from '@tanstack/react-query';
-import { LocalAudioTrack } from 'livekit-client';
 import { useEffect, useMemo, useRef } from 'react';
 
 import {
   buildAudioCaptureOptions,
-  type NoiseSuppressionLevel,
+  type NoiseSuppressionMode,
   type VoiceCapturePreferences,
 } from '../../features/voice/audio/audioConstraints';
-import { createLiveKitNoiseProcessor } from '../../features/voice/audio/noiseProcessors';
+import {
+  type NoiseSuppressionRuntimeState,
+  useNoiseSuppression,
+} from '../../features/voice/audio/useNoiseSuppression';
 import { api, type Chat, type PublicUser } from '../../lib/api';
 import { CallStage } from './CallStage';
 
 function VoiceAudioBridge({
   activeDeviceId,
   capturePreferences,
-  noiseSuppressionLevel,
+  noiseSuppressionMode,
   onError,
 }: {
   activeDeviceId: string;
-  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
-  noiseSuppressionLevel: NoiseSuppressionLevel;
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>;
+  noiseSuppressionMode: NoiseSuppressionMode;
   onError?: (message: string) => void;
 }) {
   const { localParticipant, microphoneTrack } = useLocalParticipant();
   const appliedSignature = useRef('');
   const userMuted = !localParticipant.isMicrophoneEnabled;
+  const captureOptions = useMemo(
+    () =>
+      buildAudioCaptureOptions({
+        micDeviceId: activeDeviceId,
+        noiseSuppressionMode,
+        ...capturePreferences,
+      }),
+    [activeDeviceId, capturePreferences, noiseSuppressionMode],
+  );
 
   const signature = useMemo(
-    () =>
-      JSON.stringify({
-        activeDeviceId,
-        capturePreferences,
-      }),
-    [activeDeviceId, capturePreferences],
+    () => JSON.stringify(captureOptions),
+    [captureOptions],
   );
 
   useEffect(() => {
@@ -60,14 +67,7 @@ function VoiceAudioBridge({
       try {
         await localParticipant.setMicrophoneEnabled(false);
         if (cancelled) return;
-        await localParticipant.setMicrophoneEnabled(
-          true,
-          buildAudioCaptureOptions({
-            micDeviceId: activeDeviceId,
-            noiseSuppressionLevel,
-            ...capturePreferences,
-          }),
-        );
+        await localParticipant.setMicrophoneEnabled(true, captureOptions);
       } catch (caught) {
         appliedSignature.current = '';
         onError?.(
@@ -83,10 +83,11 @@ function VoiceAudioBridge({
     };
   }, [
     activeDeviceId,
+    captureOptions,
     capturePreferences,
     localParticipant,
     microphoneTrack,
-    noiseSuppressionLevel,
+    noiseSuppressionMode,
     onError,
     signature,
   ]);
@@ -95,39 +96,18 @@ function VoiceAudioBridge({
 }
 
 function VoiceNoiseSuppressionBridge({
-  noiseSuppressionLevel,
+  noiseSuppressionMode,
+  onStateChange,
 }: {
-  noiseSuppressionLevel: NoiseSuppressionLevel;
+  noiseSuppressionMode: NoiseSuppressionMode;
+  onStateChange: (next: NoiseSuppressionRuntimeState) => void;
 }) {
   const { microphoneTrack } = useLocalParticipant();
-  const processor = useMemo(
-    () => createLiveKitNoiseProcessor(noiseSuppressionLevel),
-    [noiseSuppressionLevel],
-  );
+  const state = useNoiseSuppression(microphoneTrack, noiseSuppressionMode);
 
   useEffect(() => {
-    const track = microphoneTrack?.audioTrack;
-    if (!(track instanceof LocalAudioTrack)) return;
-
-    const apply = async () => {
-      try {
-        if (!processor.isSupported() || noiseSuppressionLevel === 'off') {
-          await track.stopProcessor();
-          return;
-        }
-
-        await track.setProcessor(processor);
-      } catch {
-        await track.stopProcessor();
-      }
-    };
-
-    void apply();
-
-    return () => {
-      void track.stopProcessor();
-    };
-  }, [microphoneTrack, noiseSuppressionLevel, processor]);
+    onStateChange(state);
+  }, [onStateChange, state]);
 
   return null;
 }
@@ -136,13 +116,15 @@ export function ConnectedVoiceRuntime({
   activeDeviceId,
   capturePreferences,
   deafened,
-  noiseSuppressionLevel,
+  noiseSuppressionMode,
+  onNoiseSuppressionStateChange,
   onError,
 }: {
   activeDeviceId: string;
-  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>;
   deafened: boolean;
-  noiseSuppressionLevel: NoiseSuppressionLevel;
+  noiseSuppressionMode: NoiseSuppressionMode;
+  onNoiseSuppressionStateChange: (next: NoiseSuppressionRuntimeState) => void;
   onError: (message: string | null) => void;
 }) {
   return (
@@ -152,11 +134,14 @@ export function ConnectedVoiceRuntime({
       <VoiceAudioBridge
         activeDeviceId={activeDeviceId}
         capturePreferences={capturePreferences}
-        noiseSuppressionLevel={noiseSuppressionLevel}
+        noiseSuppressionMode={noiseSuppressionMode}
         onError={(message) => onError(message)}
       />
 
-      <VoiceNoiseSuppressionBridge noiseSuppressionLevel={noiseSuppressionLevel} />
+      <VoiceNoiseSuppressionBridge
+        noiseSuppressionMode={noiseSuppressionMode}
+        onStateChange={onNoiseSuppressionStateChange}
+      />
     </>
   );
 }
@@ -168,7 +153,8 @@ function ConnectedVoiceStage({
   deafened,
   devices,
   error,
-  noiseSuppressionLevel,
+  noiseSuppressionMode,
+  noiseSuppressionState,
   onCloseSettings,
   onLeaveVoice,
   onOpenSettings,
@@ -177,17 +163,18 @@ function ConnectedVoiceStage({
   remoteParticipantVolumes,
   setCapturePreferences,
   setMicDeviceId,
-  setNoiseSuppressionLevel,
+  setNoiseSuppressionMode,
   settingsOpen,
   users,
 }: {
   activeDeviceId: string;
-  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>;
   chat: Chat;
   deafened: boolean;
   devices: MediaDeviceInfo[];
   error: string | null;
-  noiseSuppressionLevel: NoiseSuppressionLevel;
+  noiseSuppressionMode: NoiseSuppressionMode;
+  noiseSuppressionState: NoiseSuppressionRuntimeState;
   onCloseSettings: () => void;
   onLeaveVoice: () => void;
   onOpenSettings: () => void;
@@ -195,10 +182,10 @@ function ConnectedVoiceStage({
   onToggleDeafen: () => void;
   remoteParticipantVolumes: Record<string, number>;
   setCapturePreferences: (
-    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>,
+    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>,
   ) => void;
   setMicDeviceId: (next: string) => void;
-  setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
+  setNoiseSuppressionMode: (next: NoiseSuppressionMode) => void;
   settingsOpen: boolean;
   users: PublicUser[];
 }) {
@@ -210,7 +197,8 @@ function ConnectedVoiceStage({
         chat={chat}
         deafened={deafened}
         devices={devices}
-        noiseSuppressionLevel={noiseSuppressionLevel}
+        noiseSuppressionMode={noiseSuppressionMode}
+        noiseSuppressionState={noiseSuppressionState}
         onCloseSettings={onCloseSettings}
         onLeaveVoice={onLeaveVoice}
         onOpenSettings={onOpenSettings}
@@ -219,15 +207,15 @@ function ConnectedVoiceStage({
         remoteParticipantVolumes={remoteParticipantVolumes}
         setCapturePreferences={setCapturePreferences}
         setMicDeviceId={setMicDeviceId}
-        setNoiseSuppressionLevel={setNoiseSuppressionLevel}
+        setNoiseSuppressionMode={setNoiseSuppressionMode}
         settingsOpen={settingsOpen}
         users={users}
       />
 
-      {error && (
+      {(error || noiseSuppressionState.error) && (
         <div className="px-4 pb-4 md:px-6">
           <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-            {error}
+            {error ?? noiseSuppressionState.error}
           </div>
         </div>
       )}
@@ -245,7 +233,8 @@ export function VoicePanel({
   error,
   hasActiveVoiceSession,
   isVoiceJoinPending,
-  noiseSuppressionLevel,
+  noiseSuppressionMode,
+  noiseSuppressionState,
   onCloseSettings,
   onJoinVoice,
   onLeaveVoice,
@@ -256,19 +245,20 @@ export function VoicePanel({
   remoteParticipantVolumes,
   setCapturePreferences,
   setMicDeviceId,
-  setNoiseSuppressionLevel,
+  setNoiseSuppressionMode,
   settingsOpen,
 }: {
   activeDeviceId: string;
   activeVoiceChat: Chat | null;
-  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>;
   chat: Chat;
   deafened: boolean;
   devices: MediaDeviceInfo[];
   error: string | null;
   hasActiveVoiceSession: boolean;
   isVoiceJoinPending: boolean;
-  noiseSuppressionLevel: NoiseSuppressionLevel;
+  noiseSuppressionMode: NoiseSuppressionMode;
+  noiseSuppressionState: NoiseSuppressionRuntimeState;
   onCloseSettings: () => void;
   onJoinVoice: (chat: Chat) => void;
   onLeaveVoice: () => void;
@@ -278,10 +268,10 @@ export function VoicePanel({
   onToggleDeafen: () => void;
   remoteParticipantVolumes: Record<string, number>;
   setCapturePreferences: (
-    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>,
+    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>,
   ) => void;
   setMicDeviceId: (next: string) => void;
-  setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
+  setNoiseSuppressionMode: (next: NoiseSuppressionMode) => void;
   settingsOpen: boolean;
 }) {
   const isViewingActiveVoiceChat = hasActiveVoiceSession && activeVoiceChat?.id === chat.id;
@@ -307,7 +297,8 @@ export function VoicePanel({
         deafened={deafened}
         devices={devices}
         error={error}
-        noiseSuppressionLevel={noiseSuppressionLevel}
+        noiseSuppressionMode={noiseSuppressionMode}
+        noiseSuppressionState={noiseSuppressionState}
         onCloseSettings={onCloseSettings}
         onLeaveVoice={onLeaveVoice}
         onOpenSettings={onOpenSettings}
@@ -316,7 +307,7 @@ export function VoicePanel({
         remoteParticipantVolumes={remoteParticipantVolumes}
         setCapturePreferences={setCapturePreferences}
         setMicDeviceId={setMicDeviceId}
-        setNoiseSuppressionLevel={setNoiseSuppressionLevel}
+        setNoiseSuppressionMode={setNoiseSuppressionMode}
         settingsOpen={settingsOpen}
         users={users}
       />

@@ -26,10 +26,11 @@ import {
   buildAudioCaptureOptions,
   readVoiceCapturePreferences,
   writeVoiceCapturePreferences,
-  type NoiseSuppressionLevel,
+  type NoiseSuppressionMode,
   type VoiceCapturePreferences,
 } from './features/voice/audio/audioConstraints';
 import { useAudioDevices } from './features/voice/audio/useAudioDevices';
+import type { NoiseSuppressionRuntimeState } from './features/voice/audio/useNoiseSuppression';
 import { usePersistentPeerVolumes } from './features/voice/audio/usePersistentPeerVolumes';
 import { api, type Chat, type Message, type PublicUser, type VoiceToken } from './lib/api';
 import { authClient } from './lib/auth-client';
@@ -1804,17 +1805,22 @@ function ChatLayout() {
   const [voiceDeafened, setVoiceDeafened] = useState(false);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const [voiceCapturePreferences, setVoiceCapturePreferences] = useState<
-    Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>
+    Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>
   >(() => {
     const prefs = readVoiceCapturePreferences();
     return {
       autoGainControl: prefs.autoGainControl,
       echoCancellation: prefs.echoCancellation,
-      noiseSuppression: prefs.noiseSuppression,
     };
   });
-  const [noiseSuppressionLevel, setNoiseSuppressionLevel] = useState<NoiseSuppressionLevel>(
-    () => readVoiceCapturePreferences().noiseSuppressionLevel,
+  const [noiseSuppressionMode, setNoiseSuppressionMode] = useState<NoiseSuppressionMode>(
+    () => readVoiceCapturePreferences().noiseSuppressionMode,
+  );
+  const [noiseSuppressionState, setNoiseSuppressionState] = useState<NoiseSuppressionRuntimeState>(
+    () => ({
+      effectiveMode: readVoiceCapturePreferences().noiseSuppressionMode,
+      error: null,
+    }),
   );
   const {
     remoteParticipantVolumes: voiceRemoteParticipantVolumes,
@@ -1834,10 +1840,9 @@ function ChatLayout() {
       autoGainControl: voiceCapturePreferences.autoGainControl,
       echoCancellation: voiceCapturePreferences.echoCancellation,
       micDeviceId: activeDeviceId,
-      noiseSuppression: voiceCapturePreferences.noiseSuppression,
-      noiseSuppressionLevel,
+      noiseSuppressionMode,
     }),
-    [activeDeviceId, noiseSuppressionLevel, voiceCapturePreferences],
+    [activeDeviceId, noiseSuppressionMode, voiceCapturePreferences],
   );
 
   useEffect(() => {
@@ -1858,15 +1863,21 @@ function ChatLayout() {
       {
         autoGainControl: voiceCapturePreferences.autoGainControl,
         echoCancellation: voiceCapturePreferences.echoCancellation,
-        noiseSuppression: voiceCapturePreferences.noiseSuppression,
       },
       readVoiceCapturePreferences(),
     );
   }, [voiceCapturePreferences]);
 
   useEffect(() => {
-    writeVoiceCapturePreferences({ noiseSuppressionLevel }, readVoiceCapturePreferences());
-  }, [noiseSuppressionLevel]);
+    writeVoiceCapturePreferences({ noiseSuppressionMode }, readVoiceCapturePreferences());
+  }, [noiseSuppressionMode]);
+
+  useEffect(() => {
+    setNoiseSuppressionState({
+      effectiveMode: noiseSuppressionMode,
+      error: null,
+    });
+  }, [noiseSuppressionMode]);
 
   useEffect(() => {
     setVoiceSettingsOpen(false);
@@ -2127,7 +2138,8 @@ function ChatLayout() {
       error={voiceError}
       hasActiveVoiceSession={!!voiceSession && !!activeVoiceChatId}
       isVoiceJoinPending={voiceJoinPendingChatId === selectedChat.id}
-      noiseSuppressionLevel={noiseSuppressionLevel}
+      noiseSuppressionMode={noiseSuppressionMode}
+      noiseSuppressionState={noiseSuppressionState}
       onCloseSettings={() => setVoiceSettingsOpen(false)}
       onJoinVoice={joinVoiceChat}
       onLeaveVoice={leaveVoiceChat}
@@ -2144,7 +2156,7 @@ function ChatLayout() {
       remoteParticipantVolumes={voiceRemoteParticipantVolumes}
       setCapturePreferences={setVoiceCapturePreferences}
       setMicDeviceId={setMicDeviceId}
-      setNoiseSuppressionLevel={setNoiseSuppressionLevel}
+      setNoiseSuppressionMode={setNoiseSuppressionMode}
       settingsOpen={voiceSettingsOpen}
     />
   ) : null;
@@ -2210,7 +2222,8 @@ function ChatLayout() {
         activeDeviceId={activeDeviceId}
         capturePreferences={voiceCapturePreferences}
         deafened={voiceDeafened}
-        noiseSuppressionLevel={noiseSuppressionLevel}
+        noiseSuppressionMode={noiseSuppressionMode}
+        onNoiseSuppressionStateChange={setNoiseSuppressionState}
         onError={setVoiceError}
       />
       {rightPaneContent}

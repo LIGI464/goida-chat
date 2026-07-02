@@ -11,9 +11,10 @@ import { useEffect, useMemo } from 'react';
 
 import { useAudioLevelMeter } from '../../features/voice/audio/useAudioLevelMeter';
 import type {
-  NoiseSuppressionLevel,
+  NoiseSuppressionMode,
   VoiceCapturePreferences,
 } from '../../features/voice/audio/audioConstraints';
+import type { NoiseSuppressionRuntimeState } from '../../features/voice/audio/useNoiseSuppression';
 import { DEFAULT_VOICE_PEER_VOLUME } from '../../features/voice/audio/usePersistentPeerVolumes';
 import type { Chat, PublicUser } from '../../lib/api';
 import { AudioSettingsDrawer } from './AudioSettingsDrawer';
@@ -61,8 +62,9 @@ export function CallStage({
   capturePreferences,
   setCapturePreferences,
   setMicDeviceId,
-  noiseSuppressionLevel,
-  setNoiseSuppressionLevel,
+  noiseSuppressionMode,
+  noiseSuppressionState,
+  setNoiseSuppressionMode,
   remoteParticipantVolumes,
   onRemoteParticipantVolumeChange,
 }: {
@@ -76,13 +78,14 @@ export function CallStage({
   settingsOpen: boolean;
   activeDeviceId: string;
   devices: MediaDeviceInfo[];
-  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>;
   setCapturePreferences: (
-    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>,
+    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>,
   ) => void;
   setMicDeviceId: (next: string) => void;
-  noiseSuppressionLevel: NoiseSuppressionLevel;
-  setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
+  noiseSuppressionMode: NoiseSuppressionMode;
+  noiseSuppressionState: NoiseSuppressionRuntimeState;
+  setNoiseSuppressionMode: (next: NoiseSuppressionMode) => void;
   remoteParticipantVolumes: Record<string, number>;
   onRemoteParticipantVolumeChange: (remoteUserId: string, nextValue: number) => void;
 }) {
@@ -92,7 +95,7 @@ export function CallStage({
   const trackRefs = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }]);
   const { microphoneTrack } = useLocalParticipant();
   const meterTrack = microphoneTrack?.audioTrack?.mediaStreamTrack;
-  const meter = useAudioLevelMeter(meterTrack, noiseSuppressionLevel);
+  const meter = useAudioLevelMeter(meterTrack, noiseSuppressionMode);
   const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
 
   useEffect(() => {
@@ -200,14 +203,15 @@ export function CallStage({
           devices={devices}
           micLevel={meter.level}
           micSpeaking={meter.speaking}
-          noiseSuppressionLevel={noiseSuppressionLevel}
+          noiseSuppressionMode={noiseSuppressionMode}
+          noiseSuppressionState={noiseSuppressionState}
           onClose={onCloseSettings}
           onRemoteVolumeChange={onRemoteParticipantVolumeChange}
           open={settingsOpen}
           remoteVolumes={remoteVolumes}
           setCapturePreferences={setCapturePreferences}
           setMicDeviceId={setMicDeviceId}
-          setNoiseSuppressionLevel={setNoiseSuppressionLevel}
+          setNoiseSuppressionMode={setNoiseSuppressionMode}
         />
       </div>
     </section>

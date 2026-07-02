@@ -1,10 +1,12 @@
 import { useEffect } from 'react';
 
 import {
-  NOISE_SUPPRESSION_LEVELS,
-  type NoiseSuppressionLevel,
+  NOISE_SUPPRESSION_MODES,
+  type NoiseSuppressionMode,
   type VoiceCapturePreferences,
 } from '../../features/voice/audio/audioConstraints';
+import { supportsEnhancedNoiseSuppression } from '../../features/voice/audio/noiseProcessors';
+import type { NoiseSuppressionRuntimeState } from '../../features/voice/audio/useNoiseSuppression';
 import {
   MAX_VOICE_PEER_VOLUME,
   MIN_VOICE_PEER_VOLUME,
@@ -35,16 +37,22 @@ function SelectChevron() {
 function ToggleRow({
   checked,
   description,
+  disabled = false,
   label,
   onChange,
 }: {
   checked: boolean;
   description: string;
+  disabled?: boolean;
   label: string;
   onChange: (checked: boolean) => void;
 }) {
   return (
-    <label className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-[22px] border border-[var(--border)] bg-black/10 px-3 py-3">
+    <label
+      className={`grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-3 rounded-[22px] border border-[var(--border)] bg-black/10 px-3 py-3 ${
+        disabled ? 'opacity-70' : ''
+      }`}
+    >
       <span className="min-w-0 pr-1">
         <span className="block text-sm font-medium text-[var(--text)]">{label}</span>
         <span className="mt-1 block text-xs leading-5 text-[var(--muted)]">{description}</span>
@@ -52,6 +60,7 @@ function ToggleRow({
       <input
         checked={checked}
         className="mt-1 h-4 w-4 shrink-0 self-start accent-[var(--accent)]"
+        disabled={disabled}
         onChange={(event) => onChange(event.target.checked)}
         type="checkbox"
       />
@@ -67,8 +76,9 @@ export function AudioSettingsDrawer({
   capturePreferences,
   setCapturePreferences,
   setMicDeviceId,
-  noiseSuppressionLevel,
-  setNoiseSuppressionLevel,
+  noiseSuppressionMode,
+  noiseSuppressionState,
+  setNoiseSuppressionMode,
   micLevel,
   micSpeaking,
   remoteVolumes,
@@ -78,13 +88,14 @@ export function AudioSettingsDrawer({
   devices: MediaDeviceInfo[];
   open: boolean;
   onClose: () => void;
-  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>;
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>;
   setCapturePreferences: (
-    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionLevel'>,
+    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>,
   ) => void;
   setMicDeviceId: (next: string) => void;
-  noiseSuppressionLevel: NoiseSuppressionLevel;
-  setNoiseSuppressionLevel: (next: NoiseSuppressionLevel) => void;
+  noiseSuppressionMode: NoiseSuppressionMode;
+  noiseSuppressionState: NoiseSuppressionRuntimeState;
+  setNoiseSuppressionMode: (next: NoiseSuppressionMode) => void;
   micLevel: number;
   micSpeaking: boolean;
   remoteVolumes: Array<{ remoteUserId: string; label: string; value: number }>;
@@ -105,13 +116,11 @@ export function AudioSettingsDrawer({
 
   if (!open) return null;
 
-  const activeLevel = NOISE_SUPPRESSION_LEVELS.find(
-    (level) => level.value === noiseSuppressionLevel,
-  );
-  const supportsRealtimeProcessing =
-    typeof window !== 'undefined' &&
-    ('AudioContext' in window || 'webkitAudioContext' in window);
-  const processingUnavailable = noiseSuppressionLevel !== 'off' && !supportsRealtimeProcessing;
+  const activeMode = NOISE_SUPPRESSION_MODES.find((mode) => mode.value === noiseSuppressionMode);
+  const enhancedAvailable = supportsEnhancedNoiseSuppression();
+  const enhancedFallback =
+    noiseSuppressionMode === 'enhanced' && noiseSuppressionState.effectiveMode !== 'enhanced';
+  const browserCleanupLocked = noiseSuppressionMode !== 'off';
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center p-3 sm:p-4 md:items-center md:justify-end md:p-6">
@@ -124,13 +133,15 @@ export function AudioSettingsDrawer({
 
       <aside
         aria-modal="true"
-        className="audio-settings-panel relative z-10 flex w-[min(90vw,480px)] min-w-0 max-w-[520px] max-h-[85vh] flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--panel)] shadow-[0_30px_80px_rgba(0,0,0,0.4)]"
+        className="audio-settings-panel relative z-10 flex max-h-[85vh] w-[min(90vw,480px)] min-w-0 max-w-[520px] flex-col overflow-hidden rounded-[28px] border border-[var(--border)] bg-[var(--panel)] shadow-[0_30px_80px_rgba(0,0,0,0.4)]"
         role="dialog"
       >
         <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-4 py-4 md:px-5">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-[var(--text)]">Настройки звука</h3>
-            <p className="text-sm text-[var(--muted)]">Микрофон, шумодав и обработка аудио.</p>
+            <p className="text-sm text-[var(--muted)]">
+              Микрофон, шумодав и обработка аудио.
+            </p>
           </div>
           <button
             aria-label="Закрыть"
@@ -175,13 +186,13 @@ export function AudioSettingsDrawer({
                 <select
                   className="h-11 w-full min-w-0 appearance-none rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] px-3 pr-11 text-sm leading-5 text-[var(--text)] outline-none transition-colors duration-150 focus:border-[var(--accent)]"
                   onChange={(event) =>
-                    setNoiseSuppressionLevel(event.target.value as NoiseSuppressionLevel)
+                    setNoiseSuppressionMode(event.target.value as NoiseSuppressionMode)
                   }
-                  value={noiseSuppressionLevel}
+                  value={noiseSuppressionMode}
                 >
-                  {NOISE_SUPPRESSION_LEVELS.map((level) => (
-                    <option key={level.value} value={level.value}>
-                      {level.label}
+                  {NOISE_SUPPRESSION_MODES.map((mode) => (
+                    <option key={mode.value} value={mode.value}>
+                      {mode.label}
                     </option>
                   ))}
                 </select>
@@ -189,32 +200,40 @@ export function AudioSettingsDrawer({
               </label>
               <div className="flex flex-wrap items-center gap-2 text-[11px]">
                 <span className="rounded-full border border-[var(--border)] bg-black/10 px-2.5 py-1 text-[var(--text)]">
-                  {activeLevel?.label ?? 'Off'}
+                  {activeMode?.label ?? 'Off'}
                 </span>
-                {processingUnavailable && (
+                {!enhancedAvailable && (
                   <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-100">
-                    Доп. обработка недоступна в этом браузере
+                    Усиленный режим недоступен в этом браузере
+                  </span>
+                )}
+                {enhancedFallback && (
+                  <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-100">
+                    Используется браузерный fallback
                   </span>
                 )}
               </div>
               <p className="text-xs leading-5 text-[var(--muted)]">
-                {processingUnavailable
-                  ? 'Будет использован микрофон без дополнительной обработки.'
-                  : (activeLevel?.hint ?? 'Без дополнительной обработки.')}
+                {noiseSuppressionState.error ??
+                  activeMode?.hint ??
+                  'Дополнительная обработка не используется.'}
               </p>
             </section>
 
             <section className="grid gap-3 rounded-[24px] border border-[var(--border)] bg-[var(--panel-2)] p-4">
               <div>
-                <h4 className="text-sm font-medium text-[var(--text)]">Обработка аудио</h4>
+                <h4 className="text-sm font-medium text-[var(--text)]">Браузерные capture constraints</h4>
                 <p className="text-xs leading-5 text-[var(--muted)]">
-                  Настройки браузера и LiveKit для более чистого захвата голоса.
+                  {browserCleanupLocked
+                    ? 'В режимах Browser и Enhanced echo cancellation, auto gain control и noise suppression включаются автоматически.'
+                    : 'В режиме Off можно отдельно включать базовую браузерную обработку микрофона.'}
                 </p>
               </div>
 
               <ToggleRow
-                checked={capturePreferences.echoCancellation}
+                checked={browserCleanupLocked ? true : capturePreferences.echoCancellation}
                 description="Убирает повторное эхо из динамиков и наушников."
+                disabled={browserCleanupLocked}
                 label="Echo cancellation"
                 onChange={(checked) =>
                   setCapturePreferences({
@@ -225,25 +244,14 @@ export function AudioSettingsDrawer({
               />
 
               <ToggleRow
-                checked={capturePreferences.autoGainControl}
+                checked={browserCleanupLocked ? true : capturePreferences.autoGainControl}
                 description="Автоматически подравнивает громкость микрофона."
+                disabled={browserCleanupLocked}
                 label="Auto gain control"
                 onChange={(checked) =>
                   setCapturePreferences({
                     ...capturePreferences,
                     autoGainControl: checked,
-                  })
-                }
-              />
-
-              <ToggleRow
-                checked={capturePreferences.noiseSuppression}
-                description="Встроенное подавление фонового шума от браузера."
-                label="Browser noise suppression"
-                onChange={(checked) =>
-                  setCapturePreferences({
-                    ...capturePreferences,
-                    noiseSuppression: checked,
                   })
                 }
               />
@@ -267,7 +275,7 @@ export function AudioSettingsDrawer({
                 />
               </div>
               <p className="mt-2 text-xs leading-5 text-[var(--muted)]">
-                Индикатор показывает текущий входной уровень после обработки.
+                Индикатор показывает текущий входной уровень после активной обработки.
               </p>
             </section>
 

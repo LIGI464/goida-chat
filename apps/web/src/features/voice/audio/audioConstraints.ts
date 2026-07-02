@@ -1,43 +1,54 @@
 import type { AudioCaptureOptions } from 'livekit-client';
 
-export type NoiseSuppressionLevel = 'off' | 'low' | 'medium' | 'high' | 'max';
+export type NoiseSuppressionMode = 'off' | 'browser' | 'enhanced';
 
 export interface VoiceCapturePreferences {
   micDeviceId: string;
-  noiseSuppressionLevel: NoiseSuppressionLevel;
+  noiseSuppressionMode: NoiseSuppressionMode;
   echoCancellation: boolean;
   autoGainControl: boolean;
-  noiseSuppression: boolean;
 }
 
 export const VOICE_STORAGE_KEYS = {
   micDeviceId: 'voice.micDeviceId',
-  noiseSuppressionLevel: 'voice.noiseSuppressionLevel',
+  noiseSuppressionMode: 'voice.noiseSuppressionMode',
+  legacyNoiseSuppressionLevel: 'voice.noiseSuppressionLevel',
   echoCancellation: 'voice.echoCancellation',
   autoGainControl: 'voice.autoGainControl',
-  noiseSuppression: 'voice.noiseSuppression',
+  legacyNoiseSuppression: 'voice.noiseSuppression',
 } as const;
 
 export const DEFAULT_VOICE_CAPTURE_PREFERENCES: VoiceCapturePreferences = {
   micDeviceId: 'default',
-  noiseSuppressionLevel: 'medium',
+  noiseSuppressionMode: 'browser',
   echoCancellation: true,
   autoGainControl: true,
-  noiseSuppression: true,
 };
 
-export const NOISE_SUPPRESSION_LEVELS: Array<{
+export const NOISE_SUPPRESSION_MODES: Array<{
   hint: string;
   label: string;
-  value: NoiseSuppressionLevel;
+  value: NoiseSuppressionMode;
 }> = [
-  { value: 'off', label: 'Off', hint: 'Без дополнительной обработки.' },
-  { value: 'low', label: 'Low', hint: 'Мягкий gate для тихого фона.' },
-  { value: 'medium', label: 'Medium', hint: 'Рекомендуемый режим для большинства комнат.' },
-  { value: 'high', label: 'High', hint: 'Подходит для шумной комнаты.' },
-  { value: 'max', label: 'Max', hint: 'Максимальное подавление, может срезать голос.' },
+  {
+    value: 'off',
+    label: 'Off',
+    hint: 'Only the raw microphone signal is published.',
+  },
+  {
+    value: 'browser',
+    label: 'Browser',
+    hint: 'Uses browser capture cleanup with echo cancellation, AGC, and noise suppression.',
+  },
+  {
+    value: 'enhanced',
+    label: 'Enhanced',
+    hint: 'Adds RNNoise processing on top of browser cleanup when AudioWorklet is available.',
+  },
 ];
 
+const LEGACY_ENHANCED_LEVELS = new Set(['high', 'max']);
+const LEGACY_BROWSER_LEVELS = new Set(['low', 'medium']);
 const isBrowser = typeof window !== 'undefined';
 
 function readBoolean(key: string, fallback: boolean) {
@@ -55,18 +66,45 @@ function readString(key: string, fallback: string) {
   return window.localStorage.getItem(key) ?? fallback;
 }
 
-export function readVoiceCapturePreferences(): VoiceCapturePreferences {
-  const noiseSuppressionLevel = readString(
-    VOICE_STORAGE_KEYS.noiseSuppressionLevel,
-    DEFAULT_VOICE_CAPTURE_PREFERENCES.noiseSuppressionLevel,
-  ) as NoiseSuppressionLevel;
+function normalizeNoiseSuppressionMode(raw: string | null): NoiseSuppressionMode {
+  if (raw === 'off' || raw === 'browser' || raw === 'enhanced') {
+    return raw;
+  }
 
+  if (!raw) {
+    return DEFAULT_VOICE_CAPTURE_PREFERENCES.noiseSuppressionMode;
+  }
+
+  if (LEGACY_ENHANCED_LEVELS.has(raw)) {
+    return 'enhanced';
+  }
+
+  if (LEGACY_BROWSER_LEVELS.has(raw)) {
+    return 'browser';
+  }
+
+  return raw === 'off' ? 'off' : DEFAULT_VOICE_CAPTURE_PREFERENCES.noiseSuppressionMode;
+}
+
+function readNoiseSuppressionMode() {
+  if (!isBrowser) {
+    return DEFAULT_VOICE_CAPTURE_PREFERENCES.noiseSuppressionMode;
+  }
+
+  const raw =
+    window.localStorage.getItem(VOICE_STORAGE_KEYS.noiseSuppressionMode) ??
+    window.localStorage.getItem(VOICE_STORAGE_KEYS.legacyNoiseSuppressionLevel);
+
+  return normalizeNoiseSuppressionMode(raw);
+}
+
+export function readVoiceCapturePreferences(): VoiceCapturePreferences {
   return {
     micDeviceId: readString(
       VOICE_STORAGE_KEYS.micDeviceId,
       DEFAULT_VOICE_CAPTURE_PREFERENCES.micDeviceId,
     ),
-    noiseSuppressionLevel,
+    noiseSuppressionMode: readNoiseSuppressionMode(),
     echoCancellation: readBoolean(
       VOICE_STORAGE_KEYS.echoCancellation,
       DEFAULT_VOICE_CAPTURE_PREFERENCES.echoCancellation,
@@ -74,10 +112,6 @@ export function readVoiceCapturePreferences(): VoiceCapturePreferences {
     autoGainControl: readBoolean(
       VOICE_STORAGE_KEYS.autoGainControl,
       DEFAULT_VOICE_CAPTURE_PREFERENCES.autoGainControl,
-    ),
-    noiseSuppression: readBoolean(
-      VOICE_STORAGE_KEYS.noiseSuppression,
-      DEFAULT_VOICE_CAPTURE_PREFERENCES.noiseSuppression,
     ),
   };
 }
@@ -92,75 +126,57 @@ export function writeVoiceCapturePreferences(
 
   window.localStorage.setItem(VOICE_STORAGE_KEYS.micDeviceId, merged.micDeviceId);
   window.localStorage.setItem(
-    VOICE_STORAGE_KEYS.noiseSuppressionLevel,
-    merged.noiseSuppressionLevel,
+    VOICE_STORAGE_KEYS.noiseSuppressionMode,
+    merged.noiseSuppressionMode,
   );
   window.localStorage.setItem(VOICE_STORAGE_KEYS.echoCancellation, String(merged.echoCancellation));
   window.localStorage.setItem(VOICE_STORAGE_KEYS.autoGainControl, String(merged.autoGainControl));
-  window.localStorage.setItem(VOICE_STORAGE_KEYS.noiseSuppression, String(merged.noiseSuppression));
+  window.localStorage.removeItem(VOICE_STORAGE_KEYS.legacyNoiseSuppression);
 }
 
-export interface NoiseGateConfig {
-  attack: number;
-  floor: number;
-  holdMs: number;
-  release: number;
-  threshold: number;
+export function supportsVoiceIsolationConstraint() {
+  if (!isBrowser || !navigator.mediaDevices?.getSupportedConstraints) {
+    return false;
+  }
+
+  const supportedConstraints = navigator.mediaDevices.getSupportedConstraints() as
+    MediaTrackSupportedConstraints & {
+      voiceIsolation?: boolean;
+    };
+
+  return supportedConstraints.voiceIsolation === true;
 }
 
-const NOISE_GATE_CONFIGS: Record<Exclude<NoiseSuppressionLevel, 'off'>, NoiseGateConfig> = {
-  low: {
-    attack: 0.02,
-    floor: 0.18,
-    holdMs: 90,
-    release: 0.15,
-    threshold: 0.015,
-  },
-  medium: {
-    attack: 0.018,
-    floor: 0.12,
-    holdMs: 120,
-    release: 0.18,
-    threshold: 0.02,
-  },
-  high: {
-    attack: 0.014,
-    floor: 0.07,
-    holdMs: 160,
-    release: 0.22,
-    threshold: 0.028,
-  },
-  max: {
-    attack: 0.01,
-    floor: 0.03,
-    holdMs: 220,
-    release: 0.28,
-    threshold: 0.035,
-  },
-};
-
-export function getNoiseGateConfig(level: NoiseSuppressionLevel): NoiseGateConfig | null {
-  if (level === 'off') return null;
-
-  return NOISE_GATE_CONFIGS[level];
+export function isBrowserNoiseCleanupEnabled(mode: NoiseSuppressionMode) {
+  return mode !== 'off';
 }
 
-export function getVoiceActivityThreshold(level: NoiseSuppressionLevel) {
-  const config = getNoiseGateConfig(level);
-  return config ? config.threshold * 1.1 : 0.03;
+export function getVoiceActivityThreshold(mode: NoiseSuppressionMode) {
+  switch (mode) {
+    case 'enhanced':
+      return 0.02;
+    case 'browser':
+      return 0.025;
+    case 'off':
+    default:
+      return 0.03;
+  }
 }
 
 export function buildAudioCaptureOptions(
   preferences: VoiceCapturePreferences,
 ): AudioCaptureOptions {
+  const browserNoiseCleanupEnabled = isBrowserNoiseCleanupEnabled(
+    preferences.noiseSuppressionMode,
+  );
   const options: AudioCaptureOptions = {
-    autoGainControl: preferences.autoGainControl,
+    autoGainControl: browserNoiseCleanupEnabled ? true : preferences.autoGainControl,
     deviceId: preferences.micDeviceId || 'default',
-    echoCancellation: preferences.echoCancellation,
-    noiseSuppression: preferences.noiseSuppression,
+    echoCancellation: browserNoiseCleanupEnabled ? true : preferences.echoCancellation,
+    noiseSuppression: browserNoiseCleanupEnabled,
   };
 
-  if (preferences.noiseSuppression) {
+  if (browserNoiseCleanupEnabled && supportsVoiceIsolationConstraint()) {
     options.voiceIsolation = true;
   }
 
