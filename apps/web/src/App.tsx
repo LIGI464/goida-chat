@@ -423,7 +423,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
       navigate(from, { replace: true });
     } catch (caught) {
       if (caught instanceof z.ZodError) {
-        setError(caught.issues[0]?.message ?? 'Check the form fields.');
+        setError(caught.issues[0]?.message ?? 'Проверь введённые данные.');
       } else {
         setError(errorMessage(caught));
       }
@@ -447,26 +447,26 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
               variant="lockup"
             />
             <h1 className="brand-display mt-10 max-w-lg text-4xl leading-[1.05] font-semibold text-[var(--text)] xl:text-5xl">
-              Private chats, rooms, and voice sessions without extra noise.
+              Приватные чаты, комнаты и голос — без лишнего шума.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-[var(--muted-strong)]">
-              Messages, quick rooms, and voice in one calm workspace.
+              Общайся, создавай комнаты и возвращайся к звонкам в одном спокойном пространстве.
             </p>
           </div>
 
           <div className="relative grid gap-3 xl:max-w-[480px]">
             <div className="brand-surface px-5 py-4">
               <p className="brand-display text-sm font-semibold text-[var(--text)]">
-                Everything in one place
+                Всё под рукой
               </p>
               <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-                Jump back into your rooms, messages, and voice sessions without extra steps.
+                Личные чаты, комнаты и голосовые сессии рядом — без лишних переходов.
               </p>
             </div>
             <div className="flex flex-wrap gap-2 text-xs text-[var(--muted-strong)]">
-              <span className="brand-pill">Private rooms</span>
-              <span className="brand-pill">Voice sessions</span>
-              <span className="brand-pill">Keep it simple</span>
+              <span className="brand-pill">Приватные комнаты</span>
+              <span className="brand-pill">Голосовые сессии</span>
+              <span className="brand-pill">Без лишнего шума</span>
             </div>
           </div>
         </div>
@@ -482,15 +482,15 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
             </div>
 
             <div className="brand-eyebrow mb-3 text-[11px] text-[var(--muted)]">
-              {register ? 'Create account' : 'Welcome back'}
+              {register ? 'Создание аккаунта' : 'С возвращением'}
             </div>
             <h1 className="brand-display mb-2 text-3xl font-semibold text-[var(--text)]">
-              {register ? 'Register' : 'Sign in'}
+              {register ? 'Зарегистрироваться' : 'Вход'}
             </h1>
             <p className="mb-6 text-sm leading-6 text-[var(--muted)]">
               {register
-                ? 'Create an account and start chatting in rooms and calls.'
-                : 'Return to your chats, rooms, and voice sessions.'}
+                ? 'Создай аккаунт, чтобы общаться в чатах, комнатах и голосовых сессиях.'
+                : 'Вернись к своим чатам, комнатам и голосовым сессиям.'}
             </p>
 
             <form className="grid gap-3" onSubmit={submit}>
@@ -512,7 +512,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
                   minLength={3}
                   onChange={(event) => setUsername(event.target.value.toLowerCase())}
                   pattern="[a-z0-9_]+"
-                  placeholder="username"
+                  placeholder="Ник"
                   required
                   value={username}
                 />
@@ -523,7 +523,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
                 className={brandInputClassName}
                 minLength={8}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="Password"
+                placeholder="Пароль"
                 required
                 type="password"
                 value={password}
@@ -535,7 +535,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
                   className={brandInputClassName}
                   minLength={8}
                   onChange={(event) => setRepeatPassword(event.target.value)}
-                  placeholder="Repeat password"
+                  placeholder="Повтори пароль"
                   required
                   type="password"
                   value={repeatPassword}
@@ -545,7 +545,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
               {error && <p className={brandDangerNoticeClassName}>{error}</p>}
 
               <button className={brandPrimaryButtonClassName} disabled={pending}>
-                {pending ? 'Please wait...' : register ? 'Create account' : 'Sign in'}
+                {pending ? 'Подожди...' : register ? 'Зарегистрироваться' : 'Войти'}
               </button>
             </form>
 
@@ -553,7 +553,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
               className="brand-link mt-5 inline-flex w-fit text-sm"
               to={register ? '/login' : '/register'}
             >
-              {register ? 'Already have an account' : 'Create account'}
+              {register ? 'Уже есть аккаунт? Войти' : 'Создать аккаунт'}
             </Link>
           </div>
         </div>
@@ -836,20 +836,21 @@ function ChatSidebar({
 
   return (
     <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r brand-divider bg-[linear-gradient(180deg,rgba(14,15,18,0.98),rgba(8,9,11,0.98))] p-4">
-      <div className="mb-4 brand-card px-4 py-4">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+      <div className="mb-4 brand-card min-h-[118px] px-4 pt-4 pb-3">
+        <div className="flex h-full items-start justify-between gap-3">
+          <div className="min-w-0 self-end pt-5">
             <GoidaLogo
-              className="block max-w-[260px]"
+              className="block max-w-[228px]"
               imageClassName="h-auto w-full object-contain"
               variant="lockup"
             />
-            <p className="mt-3 text-xs leading-5 text-[var(--muted)]">
-              Private chats, rooms, and voice sessions in one tidy space.
-            </p>
           </div>
-          <button className={brandGhostButtonClassName} onClick={onSignOut} type="button">
-            Sign out
+          <button
+            className={`${brandGhostButtonClassName} h-9 shrink-0 self-start whitespace-nowrap px-3`}
+            onClick={onSignOut}
+            type="button"
+          >
+            Выйти
           </button>
         </div>
       </div>
@@ -1727,14 +1728,32 @@ function ChatView({
     <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,0.98),rgba(5,5,7,0.98))]">
       <header className="flex min-h-[78px] shrink-0 items-center justify-between border-b brand-divider px-4 md:px-5">
         <button
-          className="min-w-0 flex-1 rounded-2xl text-left outline-none md:cursor-default"
+          className="min-w-0 flex-1 rounded-[1.35rem] border border-[var(--border-strong)] bg-white/[0.03] px-3 py-2 text-left outline-none transition-colors duration-150 hover:border-[var(--halo-strong)] hover:bg-white/[0.05] focus-visible:border-[var(--halo-strong)] focus-visible:bg-white/[0.05] md:rounded-2xl md:border-0 md:bg-transparent md:px-0 md:py-0 md:hover:bg-transparent md:focus-visible:bg-transparent md:cursor-default"
           onClick={onOpenSidebar}
           type="button"
         >
+          <span className="mb-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] md:hidden">
+            К списку чатов
+            <svg
+              aria-hidden="true"
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 16 16"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M6 3.75 10.25 8 6 12.25"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+              />
+            </svg>
+          </span>
           <p className="brand-display truncate text-lg font-semibold text-[var(--text)]">
-            {chat.displayTitle ?? chat.title ?? 'Chat'}
+            {chat.displayTitle ?? chat.title ?? 'Чат'}
           </p>
-          <p className="text-xs text-[var(--muted)]">{chat.members.length} members</p>
+          <p className="text-xs text-[var(--muted)]">{chat.members.length} участник(ов)</p>
         </button>
 
         <div className="ml-4 flex shrink-0 items-center">
@@ -1779,7 +1798,7 @@ function ChatView({
               />
               <p className="brand-display text-lg text-[var(--text)]">Пока пусто</p>
               <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted)]">
-                Write the first message and start the conversation.
+                Напиши первое сообщение и начни разговор.
               </p>
             </div>
           )}
@@ -1824,21 +1843,28 @@ function ChatView({
         </div>
       </div>
 
-      <footer className="shrink-0 border-t brand-divider bg-[rgba(11,12,15,0.92)] p-3">
+      <footer className="shrink-0 border-t brand-divider bg-[rgba(11,12,15,0.92)] px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
         {error && <p className="mb-2 text-sm text-[var(--danger)]">{error}</p>}
         {typingUsers.length > 0 && (
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
         )}
 
-        <form className="flex items-stretch gap-2 max-sm:flex-col sm:flex-row" onSubmit={send}>
+        <form
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2"
+          onSubmit={send}
+        >
           <input
-            className={`${brandInputClassName} min-w-0 flex-1`}
+            className={`${brandInputCompactClassName} min-w-0`}
             maxLength={4000}
             onChange={(event) => setText(event.target.value)}
             placeholder="Написать сообщение..."
             value={text}
           />
-          <button className={`${brandPrimaryButtonClassName} shrink-0`}>Отправить</button>
+          <button
+            className={`${brandPrimaryButtonCompactClassName} min-w-[100px] shrink-0 whitespace-nowrap px-4`}
+          >
+            Отправить
+          </button>
         </form>
       </footer>
 

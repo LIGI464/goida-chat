@@ -1,6 +1,6 @@
 const ASSET_BY_VARIANT = {
   lockup: '/brand/goida-wordmark-ui.png',
-  mark: '/brand/goida-icon-original.png',
+  mark: '/brand/goida-icon-transparent.png',
   wordmark: '/brand/goida-wordmark-ui.png',
 } as const;
 
