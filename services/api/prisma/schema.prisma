@@ -22,6 +22,7 @@ model User {
   accounts        Account[]
   memberships     ChatMember[]
   messages        Message[]
+  invitesCreated  ChatInvite[]
 }
 
 model Session {
@@ -79,6 +80,7 @@ model Chat {
   members     ChatMember[]
   messages    Message[]
   voiceRoom   VoiceRoom?
+  invites     ChatInvite[]
 
   @@index([updatedAt])
 }
@@ -122,4 +124,17 @@ model VoiceRoom {
   livekitRoomName String   @unique
   createdAt       DateTime @default(now())
   chat            Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+}
+
+model ChatInvite {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  chatId      String
+  createdById String
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  @@index([chatId])
+  @@index([expiresAt])
 }

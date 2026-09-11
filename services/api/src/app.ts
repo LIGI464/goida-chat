@@ -15,6 +15,7 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerChatRoutes } from './routes/chats.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerVoiceRoutes } from './routes/voice.js';
+import { registerInviteRoutes } from './routes/invites.js';
 
 const appOrigin = new URL(env.APP_URL).origin;
 const devOrigins = new Set(['localhost', '127.0.0.1']);
@@ -96,6 +97,7 @@ export async function buildApp() {
   await registerUserRoutes(app, io);
   await registerChatRoutes(app, io);
   await registerVoiceRoutes(app);
+  await registerInviteRoutes(app);
   registerRealtime(io, app.log);
 
   app.addHook('onClose', async () => {
