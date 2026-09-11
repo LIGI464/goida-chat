@@ -21,7 +21,9 @@
     "db:generate": "npm run db:generate -w @goida-chat/api",
     "db:migrate": "npm run db:migrate -w @goida-chat/api",
     "db:deploy": "npm run db:deploy -w @goida-chat/api",
-    "db:seed": "npm run db:seed -w @goida-chat/api"
+    "db:seed": "npm run db:seed -w @goida-chat/api",
+    "qa:smoke-matrix": "node ./scripts/parallel-feature-smoke-matrix.mjs",
+    "qa:smoke-matrix:markdown": "node ./scripts/parallel-feature-smoke-matrix.mjs --markdown"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
