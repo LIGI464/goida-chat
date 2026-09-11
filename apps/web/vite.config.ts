@@ -16,6 +16,7 @@ export default defineConfig({
         'apple-touch-icon.png',
         'pwa-192.png',
         'pwa-512.png',
+        'brand/goida-favicon.png',
         'brand/goida-icon-original.png',
         'brand/goida-icon-transparent.png',
       ],

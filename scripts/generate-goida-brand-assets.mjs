@@ -263,13 +263,16 @@ async function main() {
   await writeTextFile(path.join(brandDir, 'goida-wordmark.svg'), wordmarkSvg);
   await writeTextFile(path.join(brandDir, 'goida-lockup.svg'), lockupSvg);
   await writeTextFile(path.join(publicDir, 'favicon.svg'), faviconSvg);
+  await renderPng(faviconSvg, path.join(brandDir, 'goida-favicon.png'), 512);
 
   await renderPng(markSvg, path.join(publicDir, 'pwa-192.png'), 192);
   await renderPng(markSvg, path.join(publicDir, 'pwa-512.png'), 512);
   await renderPng(markSvg, path.join(publicDir, 'apple-touch-icon.png'), 180);
-  await renderPng(markSvg, path.join(tmpDir, 'favicon-16.png'), 16);
-  await renderPng(markSvg, path.join(tmpDir, 'favicon-32.png'), 32);
-  await renderPng(markSvg, path.join(tmpDir, 'favicon-48.png'), 48);
+  await renderPng(faviconSvg, path.join(tmpDir, 'favicon-16.png'), 16);
+  await renderPng(faviconSvg, path.join(tmpDir, 'favicon-32.png'), 32);
+  await renderPng(faviconSvg, path.join(tmpDir, 'favicon-48.png'), 48);
+  await fs.copyFile(path.join(tmpDir, 'favicon-16.png'), path.join(publicDir, 'favicon-16.png'));
+  await fs.copyFile(path.join(tmpDir, 'favicon-32.png'), path.join(publicDir, 'favicon-32.png'));
 
   const favicon = await pngToIco([
     path.join(tmpDir, 'favicon-16.png'),
