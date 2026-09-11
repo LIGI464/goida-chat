@@ -116,6 +116,12 @@ export const api = {
       body: JSON.stringify({ username }),
     });
   },
+  createInvite(chatId: string) {
+    return apiFetch<{ token: string; url: string }>(`/chats/${chatId}/invites`, { method: 'POST' });
+  },
+  joinInvite(token: string) {
+    return apiFetch<{ chatId: string }>(`/invites/${encodeURIComponent(token)}/join`, { method: 'POST' });
+  },
   getMessages(chatId: string, cursor?: string) {
     const suffix = cursor ? `?cursor=${encodeURIComponent(cursor)}` : '';
     return apiFetch<{ messages: Message[]; nextCursor: string | null }>(

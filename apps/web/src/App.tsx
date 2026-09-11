@@ -17,7 +17,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { z } from 'zod';
 
 import { GoidaLogo } from './components/brand/GoidaLogo';
@@ -1203,6 +1203,15 @@ function GroupSettingsModal({
   const [renameSuccess, setRenameSuccess] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const linkMutation = useMutation({
+    mutationFn: () => api.createInvite(chat.id),
+    onSuccess: async ({ token }) => {
+      const url = `${window.location.origin}/invite/${token}`;
+      await navigator.clipboard?.writeText(url);
+      setInviteSuccess('Ссылка создана и скопирована.');
+    },
+    onError: (caught) => setInviteError(errorMessage(caught)),
+  });
   const normalizedSearch = normalizeUserSearch(search);
   const normalizedTitle = title.trim();
 
@@ -1414,6 +1423,16 @@ function GroupSettingsModal({
                     </span>
                   ))}
                 </div>
+              </section>
+
+              <section className="brand-surface grid gap-3 p-4">
+                <div>
+                  <p className="text-sm font-medium text-[var(--text)]">Пригласить по ссылке</p>
+                  <p className="text-xs text-[var(--muted)]">Ссылка добавит пользователя в эту комнату.</p>
+                </div>
+                <button className={brandPrimaryButtonCompactClassName} disabled={linkMutation.isPending} onClick={() => linkMutation.mutate()} type="button">
+                  {linkMutation.isPending ? 'Создаю...' : 'Создать и скопировать ссылку'}
+                </button>
               </section>
 
               <section className="brand-surface grid gap-3 p-4">
@@ -2429,7 +2448,26 @@ export function App() {
         }
         path="/app"
       />
+      <Route
+        element={
+          <ProtectedRoute>
+            <InvitePage />
+          </ProtectedRoute>
+        }
+        path="/invite/:token"
+      />
       <Route element={<Navigate replace to="/app" />} path="*" />
     </Routes>
   );
+}
+
+function InvitePage() {
+  const { token = '' } = useParams();
+  const navigate = useNavigate();
+  const mutation = useMutation({
+    mutationFn: () => api.joinInvite(token),
+    onSuccess: ({ chatId }) => navigate(`/app?chat=${encodeURIComponent(chatId)}`, { replace: true }),
+  });
+  useEffect(() => { if (token) mutation.mutate(); }, [token]);
+  return <main className="flex min-h-screen items-center justify-center p-6"><section className="brand-modal grid max-w-md gap-4 p-6 text-center"><h1 className="brand-display text-xl">Приглашение в комнату</h1><p className="text-sm text-[var(--muted)]">{mutation.isPending ? 'Подключаем...' : mutation.isError ? errorMessage(mutation.error) : 'Готово'}</p>{mutation.isError && <button className={brandPrimaryButtonCompactClassName} onClick={() => navigate('/app')} type="button">Вернуться в приложение</button>}</section></main>;
 }
