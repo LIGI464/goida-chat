@@ -250,7 +250,7 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
 
     const latest = await prisma.message.findFirst({
       where: { chatId: params.chatId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: { id: true },
     });
 

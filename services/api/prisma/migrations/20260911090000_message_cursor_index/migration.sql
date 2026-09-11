@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS "Message_chatId_createdAt_idx";`nCREATE INDEX "Message_chatId_createdAt_id_idx" ON "Message"("chatId", "createdAt", "id");

@@ -28,7 +28,7 @@ export const chatInclude = {
     include: { user: { select: publicUserSelect } },
   },
   messages: {
-    orderBy: { createdAt: 'desc' as const },
+    orderBy: [{ createdAt: 'desc' as const }, { id: 'desc' as const }],
     take: 1,
     select: messageSelect,
   },

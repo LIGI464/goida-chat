@@ -198,7 +198,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
         assertSocketRateLimit(authed, 'voice:join', 20, 60_000);
         const chatId = payload.chatId ?? '';
         await ensureChatMember(authed.data.userId, chatId);
-        await addVoicePresence(chatId, authed.data.userId);
+        await addVoicePresence(chatId, authed.data.userId, socket.id);
         authed.data.voiceChats.add(chatId);
         await emitVoicePresence(io, chatId);
         ack?.({ ok: true });
@@ -211,7 +211,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
       try {
         assertSocketRateLimit(authed, 'voice:left', 20, 60_000);
         const chatId = payload.chatId ?? '';
-        await removeVoicePresence(chatId, authed.data.userId);
+        await removeVoicePresence(chatId, authed.data.userId, socket.id);
         authed.data.voiceChats.delete(chatId);
         await emitVoicePresence(io, chatId);
         ack?.({ ok: true });
@@ -228,7 +228,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
 
       await Promise.all(
         [...authed.data.voiceChats, ...authed.data.typingChats].map(async (chatId) => {
-          await removeVoicePresence(chatId, authed.data.userId);
+          await removeVoicePresence(chatId, authed.data.userId, socket.id);
           await removeTypingPresence(chatId, authed.data.userId);
           await emitVoicePresence(io, chatId);
           await emitTypingPresence(io, chatId);
