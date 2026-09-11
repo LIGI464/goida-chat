@@ -1,116 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LocalAudioTrack } from 'livekit-client';
 import type { TrackPublication } from 'livekit-client';
 
 import type { NoiseSuppressionMode } from './audioConstraints';
-import {
-  createLiveKitNoiseProcessor,
-  supportsEnhancedNoiseSuppression,
-} from './noiseProcessors';
+import { NoiseProcessorSession } from './noiseProcessorSession';
+import type { NoiseSuppressionRuntimeState } from './noiseProcessorSession';
 
-export interface NoiseSuppressionRuntimeState {
-  effectiveMode: NoiseSuppressionMode;
-  error: string | null;
-}
-
-const ENHANCED_UNAVAILABLE_MESSAGE =
-  'Усиленный шумодав недоступен в этом браузере. Используем браузерную обработку.';
-const ENHANCED_FAILED_MESSAGE =
-  'Не удалось запустить усиленный шумодав. Используем браузерную обработку.';
+export type { NoiseSuppressionRuntimeState } from './noiseProcessorSession';
 
 export function useNoiseSuppression(
   microphoneTrack: TrackPublication | undefined,
   noiseSuppressionMode: NoiseSuppressionMode,
 ) {
+  const [session] = useState(() => new NoiseProcessorSession());
   const [state, setState] = useState<NoiseSuppressionRuntimeState>({
-    effectiveMode: noiseSuppressionMode,
+    effectiveMode: noiseSuppressionMode === 'enhanced' ? 'browser' : noiseSuppressionMode,
     error: null,
   });
-  const processor = useMemo(
-    () => createLiveKitNoiseProcessor(noiseSuppressionMode),
-    [noiseSuppressionMode],
-  );
+  const audioTrack = microphoneTrack?.audioTrack;
+  const track = audioTrack instanceof LocalAudioTrack ? audioTrack : undefined;
 
   useEffect(() => {
-    if (noiseSuppressionMode !== 'enhanced') {
-      setState({
-        effectiveMode: noiseSuppressionMode,
-        error: null,
-      });
-      return;
-    }
-
-    if (!supportsEnhancedNoiseSuppression()) {
-      setState({
-        effectiveMode: 'browser',
-        error: ENHANCED_UNAVAILABLE_MESSAGE,
-      });
-      return;
-    }
-
-    setState({
-      effectiveMode: 'browser',
-      error: null,
-    });
-  }, [noiseSuppressionMode]);
-
-  useEffect(() => {
-    const track = microphoneTrack?.audioTrack;
-    if (!(track instanceof LocalAudioTrack)) {
-      return;
-    }
-
-    let cancelled = false;
-
-    const apply = async () => {
-      if (noiseSuppressionMode !== 'enhanced') {
-        await track.stopProcessor();
-        if (!cancelled) {
-          setState({
-            effectiveMode: noiseSuppressionMode,
-            error: null,
-          });
-        }
-        return;
-      }
-
-      if (!processor.isSupported()) {
-        await track.stopProcessor();
-        if (!cancelled) {
-          setState({
-            effectiveMode: 'browser',
-            error: ENHANCED_UNAVAILABLE_MESSAGE,
-          });
-        }
-        return;
-      }
-
-      try {
-        await track.setProcessor(processor);
-        if (!cancelled) {
-          setState({
-            effectiveMode: 'enhanced',
-            error: null,
-          });
-        }
-      } catch {
-        await track.stopProcessor();
-        if (!cancelled) {
-          setState({
-            effectiveMode: 'browser',
-            error: ENHANCED_FAILED_MESSAGE,
-          });
-        }
-      }
-    };
-
-    void apply();
-
+    void session.update(track, noiseSuppressionMode, setState);
     return () => {
-      cancelled = true;
-      void track.stopProcessor();
+      // Coalesced with the next update for mode changes and React StrictMode replay.
+      // On unmount it drains the queue and releases the owned processor.
+      void session.update(undefined, 'off');
     };
-  }, [microphoneTrack, noiseSuppressionMode, processor]);
+  }, [session, track, noiseSuppressionMode]);
 
   return state;
 }
