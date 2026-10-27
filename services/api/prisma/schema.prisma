@@ -131,10 +131,14 @@ model ChatInvite {
   token       String   @unique
   chatId      String
   createdById String
-  expiresAt   DateTime?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  maxUses     Int?
+  uses        Int      @default(0)
   createdAt   DateTime @default(now())
   chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
   createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
   @@index([chatId])
   @@index([expiresAt])
+  @@index([chatId, revokedAt])
 }

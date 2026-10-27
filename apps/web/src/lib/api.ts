@@ -51,6 +51,20 @@ export type VoiceToken = {
   roomName: string;
 };
 
+export type ChatInvite = {
+  id: string;
+  token: string;
+  url: string;
+  chatId: string;
+  createdById: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  maxUses: number | null;
+  uses: number;
+  remainingUses: number | null;
+  createdAt: string;
+};
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
 
@@ -116,8 +130,17 @@ export const api = {
       body: JSON.stringify({ username }),
     });
   },
-  createInvite(chatId: string) {
-    return apiFetch<{ token: string; url: string }>(`/chats/${chatId}/invites`, { method: 'POST' });
+  createInvite(chatId: string, options?: { expiresInHours?: number; maxUses?: number | null }) {
+    return apiFetch<ChatInvite>(`/chats/${chatId}/invites`, {
+      method: 'POST',
+      ...(options ? { body: JSON.stringify(options) } : {}),
+    });
+  },
+  listInvites(chatId: string) {
+    return apiFetch<{ invites: ChatInvite[] }>(`/chats/${chatId}/invites`);
+  },
+  revokeInvite(chatId: string, inviteId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}/invites/${inviteId}`, { method: 'DELETE' });
   },
   joinInvite(token: string) {
     return apiFetch<{ chatId: string }>(`/invites/${encodeURIComponent(token)}/join`, { method: 'POST' });

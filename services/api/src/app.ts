@@ -97,7 +97,7 @@ export async function buildApp() {
   await registerUserRoutes(app, io);
   await registerChatRoutes(app, io);
   await registerVoiceRoutes(app);
-  await registerInviteRoutes(app);
+  await registerInviteRoutes(app, io);
   registerRealtime(io, app.log);
 
   app.addHook('onClose', async () => {
