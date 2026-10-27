@@ -1,23 +1,26 @@
 {
   "name": "@goida-chat/api",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
+    "test:guest": "node --import tsx --test test/guest-access.test.mjs",
+    "test:attachments": "npm run build -w @goida-chat/shared && node --import tsx --test test/attachments.test.ts",
+    "dev": "node --env-file ../../.env --watch --import tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/server.js",
+    "start": "node --env-file ../../.env dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts",
-    "db:reset-chats": "tsx prisma/reset-chats.ts"
+    "db:seed": "node --env-file ../../.env --import tsx prisma/seed.ts",
+    "db:reset-chats": "node --env-file ../../.env --import tsx prisma/reset-chats.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.0",
     "@fastify/cors": "^11.0.0",
     "@fastify/helmet": "^13.0.2",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/rate-limit": "^10.0.0",
     "@goida-chat/shared": "*",
     "@prisma/client": "^6.19.0",

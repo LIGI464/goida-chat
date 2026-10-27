@@ -1,133 +1,231 @@
 import type { AudioProcessorOptions, TrackProcessor } from 'livekit-client';
 import { Track } from 'livekit-client';
 
-import { getNoiseGateConfig, type NoiseSuppressionLevel } from './audioConstraints';
+import type { NoiseSuppressionMode } from './audioConstraints';
 
 export interface NoiseProcessor {
   isSupported(): boolean;
   createProcessedTrack(
     inputTrack: MediaStreamTrack,
-    level: NoiseSuppressionLevel,
+    audioContext?: AudioContext,
   ): Promise<MediaStreamTrack>;
   destroy(): void;
 }
 
-function getRms(samples: Uint8Array) {
-  let sum = 0;
+type RnnoiseModule = typeof import('@sapphi-red/web-noise-suppressor');
+type AudioContextConstructor = typeof AudioContext;
+type EnhancedProcessorAssets = {
+  RnnoiseWorkletNode: RnnoiseModule['RnnoiseWorkletNode'];
+  loadRnnoise: RnnoiseModule['loadRnnoise'];
+  rnnoiseSimdWasmUrl: string;
+  rnnoiseWasmUrl: string;
+  workletUrl: string;
+};
 
-  for (const sample of samples) {
-    const centered = (sample - 128) / 128;
-    sum += centered * centered;
-  }
+let enhancedProcessorAssetsPromise: Promise<EnhancedProcessorAssets> | null = null;
+let rnnoiseBinaryPromise: Promise<ArrayBuffer> | null = null;
+const workletLoadPromises = new WeakMap<AudioContext, Promise<void>>();
 
-  return Math.sqrt(sum / samples.length);
-}
+function getAudioContextConstructor(): AudioContextConstructor | null {
+  if (typeof window === 'undefined') return null;
 
-export class BrowserNoiseProcessor implements NoiseProcessor {
-  #audioContext: AudioContext | null = null;
-  #analyser: AnalyserNode | null = null;
-  #destination: MediaStreamAudioDestinationNode | null = null;
-  #gain: GainNode | null = null;
-  #rafId = 0;
-  #source: MediaStreamAudioSourceNode | null = null;
-  #stopped = false;
-  #processedTrack: MediaStreamTrack | null = null;
-
-  isSupported() {
-    return typeof window !== 'undefined' && typeof window.AudioContext !== 'undefined';
-  }
-
-  async createProcessedTrack(inputTrack: MediaStreamTrack, level: NoiseSuppressionLevel) {
-    const config = getNoiseGateConfig(level);
-    if (!config || !this.isSupported()) return inputTrack;
-
-    const audioContext = new AudioContext();
-    this.#audioContext = audioContext;
-    await audioContext.resume().catch(() => undefined);
-
-    const sourceStream = new MediaStream([inputTrack]);
-    this.#source = audioContext.createMediaStreamSource(sourceStream);
-    this.#analyser = audioContext.createAnalyser();
-    this.#gain = audioContext.createGain();
-    this.#destination = audioContext.createMediaStreamDestination();
-    this.#analyser.fftSize = 1024;
-    this.#gain.gain.value = 1;
-
-    this.#source.connect(this.#analyser);
-    this.#analyser.connect(this.#gain);
-    this.#gain.connect(this.#destination);
-
-    const outputTrack = this.#destination.stream.getAudioTracks()[0];
-    if (!outputTrack) return inputTrack;
-
-    this.#processedTrack = outputTrack;
-    this.#stopped = false;
-
-    const samples = new Uint8Array(this.#analyser.fftSize);
-    let openedUntil = 0;
-    let smoothedGain = 1;
-
-    const tick = () => {
-      if (
-        this.#stopped ||
-        !this.#audioContext ||
-        !this.#analyser ||
-        !this.#gain ||
-        !this.#destination
-      ) {
-        return;
-      }
-
-      this.#analyser.getByteTimeDomainData(samples);
-      const rms = getRms(samples);
-      const speaking = rms >= config.threshold;
-      const now = performance.now();
-
-      if (speaking) {
-        openedUntil = now + config.holdMs;
-      }
-
-      const open = now <= openedUntil;
-      const targetGain = open
-        ? 1
-        : config.floor +
-          Math.min(1, Math.max(0, (rms - config.threshold) / config.threshold)) *
-            (1 - config.floor);
-
-      smoothedGain += (targetGain - smoothedGain) * (open ? config.attack : config.release);
-      this.#gain.gain.setTargetAtTime(
-        smoothedGain,
-        this.#audioContext.currentTime,
-        open ? config.attack : config.release,
-      );
-
-      this.#rafId = window.requestAnimationFrame(tick);
+  const audioWindow = window as Window &
+    typeof globalThis & {
+      webkitAudioContext?: AudioContextConstructor;
     };
 
-    this.#rafId = window.requestAnimationFrame(tick);
-    return outputTrack;
+  return audioWindow.AudioContext ?? audioWindow.webkitAudioContext ?? null;
+}
+
+async function loadEnhancedProcessorAssets() {
+  if (!enhancedProcessorAssetsPromise) {
+    enhancedProcessorAssetsPromise = Promise.all([
+      import('@sapphi-red/web-noise-suppressor'),
+      import('@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url'),
+      import('@sapphi-red/web-noise-suppressor/rnnoise.wasm?url'),
+      import('@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url'),
+    ])
+      .then(([module, workletUrlModule, wasmUrlModule, simdWasmUrlModule]) => ({
+        RnnoiseWorkletNode: module.RnnoiseWorkletNode,
+        loadRnnoise: module.loadRnnoise,
+        rnnoiseSimdWasmUrl: simdWasmUrlModule.default,
+        rnnoiseWasmUrl: wasmUrlModule.default,
+        workletUrl: workletUrlModule.default,
+      }))
+      .catch((error) => {
+        enhancedProcessorAssetsPromise = null;
+        throw error;
+      });
+  }
+
+  return enhancedProcessorAssetsPromise;
+}
+
+async function loadRnnoiseBinary() {
+  if (!rnnoiseBinaryPromise) {
+    rnnoiseBinaryPromise = loadEnhancedProcessorAssets()
+      .then((assets) =>
+        assets.loadRnnoise({
+          simdUrl: assets.rnnoiseSimdWasmUrl,
+          url: assets.rnnoiseWasmUrl,
+        }),
+      )
+      .catch((error) => {
+        rnnoiseBinaryPromise = null;
+        throw error;
+      });
+  }
+
+  return rnnoiseBinaryPromise;
+}
+
+function loadWorklet(audioContext: AudioContext, workletUrl: string) {
+  const existingPromise = workletLoadPromises.get(audioContext);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const loadPromise = audioContext.audioWorklet.addModule(workletUrl).catch((error) => {
+    workletLoadPromises.delete(audioContext);
+    throw error;
+  });
+  workletLoadPromises.set(audioContext, loadPromise);
+  return loadPromise;
+}
+
+export function supportsEnhancedNoiseSuppression() {
+  const AudioContextCtor = getAudioContextConstructor();
+
+  return (
+    typeof window !== 'undefined' &&
+    AudioContextCtor !== null &&
+    typeof AudioWorkletNode !== 'undefined' &&
+    'audioWorklet' in AudioContextCtor.prototype
+  );
+}
+
+export class EnhancedNoiseProcessor implements NoiseProcessor {
+  #audioContext: AudioContext | null = null;
+  #destination: MediaStreamAudioDestinationNode | null = null;
+  #generation = 0;
+  #processedTrack: MediaStreamTrack | null = null;
+  #rnnoiseNode: AudioWorkletNode | null = null;
+  #source: MediaStreamAudioSourceNode | null = null;
+  #inputTrack: MediaStreamTrack | null = null;
+
+  isSupported() {
+    return supportsEnhancedNoiseSuppression();
+  }
+
+  async createProcessedTrack(inputTrack: MediaStreamTrack, audioContext?: AudioContext) {
+    if (!audioContext || audioContext.state === 'closed') {
+      throw new Error('LiveKit did not provide a usable AudioContext for noise suppression.');
+    }
+    if (!this.isSupported() || audioContext.sampleRate !== 48_000) {
+      throw new Error('RNNoise requires AudioWorklet and a 48kHz audio context.');
+    }
+
+    const generation = ++this.#generation;
+    // A device restart replaces only the source. Keep the output identity used by the sender.
+    if (
+      this.#audioContext === audioContext &&
+      this.#processedTrack?.readyState === 'live' &&
+      this.#rnnoiseNode
+    ) {
+      if (this.#inputTrack !== inputTrack) {
+        const source = audioContext.createMediaStreamSource(new MediaStream([inputTrack]));
+        try {
+          source.connect(this.#rnnoiseNode);
+        } catch (error) {
+          source.disconnect();
+          throw error;
+        }
+        this.#source?.disconnect();
+        this.#source = source;
+        this.#inputTrack = inputTrack;
+      }
+      return this.#processedTrack;
+    }
+    this.#destroyGraph();
+
+    let source: MediaStreamAudioSourceNode | null = null;
+    let destination: MediaStreamAudioDestinationNode | null = null;
+    let rnnoiseNode: AudioWorkletNode | null = null;
+
+    try {
+      // LiveKit owns context resume/close. In particular, do not wait on a suspended
+      // context here: autoplay restrictions must not block the track-change lock.
+      const [assets, wasmBinary] = await Promise.all([
+        loadEnhancedProcessorAssets(),
+        loadRnnoiseBinary(),
+      ]);
+
+      await loadWorklet(audioContext, assets.workletUrl);
+      if (generation !== this.#generation) {
+        throw new Error('Noise suppression processor initialization was superseded.');
+      }
+
+      source = audioContext.createMediaStreamSource(new MediaStream([inputTrack]));
+      destination = audioContext.createMediaStreamDestination();
+      rnnoiseNode = new assets.RnnoiseWorkletNode(audioContext, {
+        maxChannels: 2,
+        wasmBinary,
+      });
+
+      source.connect(rnnoiseNode);
+      rnnoiseNode.connect(destination);
+
+      const outputTrack = destination.stream.getAudioTracks()[0];
+      if (!outputTrack) {
+        throw new Error('Enhanced noise suppression produced no output track.');
+      }
+
+      this.#audioContext = audioContext;
+      this.#inputTrack = inputTrack;
+      this.#source = source;
+      this.#destination = destination;
+      this.#rnnoiseNode = rnnoiseNode;
+      this.#processedTrack = outputTrack;
+
+      return outputTrack;
+    } catch (error) {
+      this.#destroyNodes(source, destination, rnnoiseNode);
+      if (generation === this.#generation) {
+        this.#destroyGraph();
+      }
+      throw error;
+    }
   }
 
   destroy() {
-    this.#stopped = true;
-    if (this.#rafId) {
-      window.cancelAnimationFrame(this.#rafId);
-      this.#rafId = 0;
-    }
+    this.#generation += 1;
+    this.#destroyGraph();
+  }
 
-    this.#processedTrack?.stop();
+  #destroyNodes(
+    source: MediaStreamAudioSourceNode | null,
+    destination: MediaStreamAudioDestinationNode | null,
+    rnnoiseNode: AudioWorkletNode | null,
+  ) {
+    destination?.stream.getTracks().forEach((track) => track.stop());
+
+    const destroyableNode = rnnoiseNode as (AudioWorkletNode & { destroy?: () => void }) | null;
+    destroyableNode?.destroy?.();
+    destroyableNode?.disconnect();
+    destroyableNode?.port.close();
+
+    source?.disconnect();
+    destination?.disconnect();
+  }
+
+  #destroyGraph() {
+    this.#destroyNodes(this.#source, this.#destination, this.#rnnoiseNode);
     this.#processedTrack = null;
-    this.#source?.disconnect();
-    this.#analyser?.disconnect();
-    this.#gain?.disconnect();
-    this.#destination?.disconnect();
+    this.#rnnoiseNode = null;
     this.#source = null;
-    this.#analyser = null;
-    this.#gain = null;
     this.#destination = null;
-
-    void this.#audioContext?.close().catch(() => undefined);
     this.#audioContext = null;
+    this.#inputTrack = null;
   }
 }
 
@@ -143,22 +241,20 @@ export class NoopNoiseProcessor implements NoiseProcessor {
   destroy() {}
 }
 
-export class RnnoiseProcessor extends BrowserNoiseProcessor {
-  override isSupported() {
-    return false;
-  }
-}
-
-class LiveKitNoiseProcessor implements TrackProcessor<Track.Kind.Audio, AudioProcessorOptions> {
+export class LiveKitNoiseProcessor implements TrackProcessor<
+  Track.Kind.Audio,
+  AudioProcessorOptions
+> {
   name: string;
   processedTrack?: MediaStreamTrack;
-  #level: NoiseSuppressionLevel;
   #processor: NoiseProcessor;
-  #inputTrack: MediaStreamTrack | null = null;
+  #operation: Promise<void> = Promise.resolve();
+  #audioContext: AudioContext | undefined;
+  #generation = 0;
+  #active = false;
 
-  constructor(processor: NoiseProcessor, level: NoiseSuppressionLevel) {
+  constructor(processor: NoiseProcessor) {
     this.#processor = processor;
-    this.#level = level;
     this.name = processor.constructor.name;
   }
 
@@ -166,37 +262,83 @@ class LiveKitNoiseProcessor implements TrackProcessor<Track.Kind.Audio, AudioPro
     return this.#processor.isSupported();
   }
 
-  async init(opts: AudioProcessorOptions) {
-    this.#inputTrack = opts.track;
-    this.processedTrack = await this.#processor.createProcessedTrack(opts.track, this.#level);
+  init(opts: AudioProcessorOptions) {
+    const generation = this.#generation;
+    return this.#enqueue(async () => {
+      if (generation !== this.#generation) throw new Error('Processor initialization cancelled.');
+      this.#destroyCurrent();
+      this.#audioContext = opts.audioContext;
+      try {
+        await this.#process(opts.track, generation);
+        this.#active = true;
+      } catch (error) {
+        this.#destroyCurrent();
+        throw error;
+      }
+    });
   }
 
-  async restart(opts: AudioProcessorOptions) {
-    await this.destroy();
-    this.#inputTrack = opts.track;
-    this.processedTrack = await this.#processor.createProcessedTrack(opts.track, this.#level);
+  restart(opts: AudioProcessorOptions) {
+    const generation = this.#generation;
+    return this.#enqueue(async () => {
+      if (!this.#active || generation !== this.#generation) return;
+      // LiveKit 2.x omits audioContext from LocalTrack.setMediaStreamTrack's restart.
+      this.#audioContext = opts.audioContext ?? this.#audioContext;
+      try {
+        await this.#process(opts.track, generation);
+      } catch (error) {
+        this.#destroyCurrent();
+        throw error;
+      }
+    });
   }
 
-  async destroy() {
-    if (this.processedTrack && this.processedTrack !== this.#inputTrack) {
-      this.processedTrack.stop();
+  destroy() {
+    this.#generation += 1;
+    this.#active = false;
+    // Invalidate pending asset loading immediately; queued restarts cannot revive it.
+    this.#destroyCurrent();
+    return this.#enqueue(async () => {
+      this.#destroyCurrent();
+    });
+  }
+
+  async #process(input: MediaStreamTrack, generation: number) {
+    const output = await this.#processor.createProcessedTrack(input, this.#audioContext);
+    if (generation !== this.#generation) {
+      this.#processor.destroy();
+      throw new Error('Processor initialization cancelled.');
     }
+    // LiveKit stops processedTrack on detach. Never expose the borrowed input as output.
+    if (output !== input) this.processedTrack = output;
+    else delete this.processedTrack;
+  }
 
+  #enqueue<T>(operation: () => Promise<T>) {
+    const next = this.#operation.then(operation, operation);
+    this.#operation = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  #destroyCurrent() {
     delete this.processedTrack;
-    this.#inputTrack = null;
+    this.#audioContext = undefined;
+    this.#active = false;
     this.#processor.destroy();
   }
 }
 
-export function createNoiseProcessor(level: NoiseSuppressionLevel) {
-  if (level === 'off') return new NoopNoiseProcessor();
+export function createNoiseProcessor(mode: NoiseSuppressionMode) {
+  if (mode !== 'enhanced') {
+    return new NoopNoiseProcessor();
+  }
 
-  const rnnoise = new RnnoiseProcessor();
-  if (rnnoise.isSupported()) return rnnoise;
-
-  return new BrowserNoiseProcessor();
+  return new EnhancedNoiseProcessor();
 }
 
-export function createLiveKitNoiseProcessor(level: NoiseSuppressionLevel) {
-  return new LiveKitNoiseProcessor(createNoiseProcessor(level), level);
+export function createLiveKitNoiseProcessor(mode: NoiseSuppressionMode) {
+  return new LiveKitNoiseProcessor(createNoiseProcessor(mode));
 }

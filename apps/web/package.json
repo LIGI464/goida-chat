@@ -1,6 +1,6 @@
 {
   "name": "@goida-chat/web",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,8 +10,11 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@fontsource/manrope": "^5.2.8",
+    "@fontsource/sora": "^5.2.8",
     "@goida-chat/shared": "*",
     "@livekit/components-react": "^2.9.0",
+    "@sapphi-red/web-noise-suppressor": "^0.3.5",
     "@tanstack/react-query": "^5.0.0",
     "better-auth": "^1.6.20",
     "livekit-client": "^2.15.0",

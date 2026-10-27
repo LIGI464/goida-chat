@@ -1,6 +1,7 @@
 const defaultApiUrl = import.meta.env.DEV ? 'http://localhost:3000' : window.location.origin;
+const configuredApiUrl = import.meta.env.VITE_API_URL?.trim();
 
-export const apiUrl = import.meta.env.VITE_API_URL || defaultApiUrl;
+export const apiUrl = (configuredApiUrl || defaultApiUrl).replace(/\/+$/, '');
 
 export type PublicUser = {
   id: string;
@@ -24,12 +25,32 @@ export type Message = {
   createdAt: string;
   editedAt?: string | null;
   user: PublicUser;
+  attachments: Attachment[];
 };
+
+export type Attachment = {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  status: 'active' | 'expired' | 'uploading';
+  expiresAt: string;
+};
+
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 export type Chat = {
   id: string;
   type: 'direct' | 'group';
   title?: string | null;
+  createdById?: string | null;
   displayTitle?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -40,7 +61,15 @@ export type Chat = {
 };
 
 export type SessionUser = PublicUser & {
-  email: string;
+  email: string | null;
+};
+
+export type PrincipalSession = {
+  kind: 'user' | 'guest';
+  user: SessionUser;
+  session: { id: string; expiresAt: string };
+  chatId?: string;
+  inviteToken?: string;
 };
 
 export type VoiceToken = {
@@ -49,25 +78,93 @@ export type VoiceToken = {
   roomName: string;
 };
 
+export type ChatInvite = {
+  id: string;
+  token: string;
+  url: string;
+  chatId: string;
+  createdById: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  maxUses: number | null;
+  uses: number;
+  remainingUses: number | null;
+  createdAt: string;
+};
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiUrl}${path}`, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      ...(init?.body ? { 'content-type': 'application/json' } : {}),
-      ...init?.headers,
-    },
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${apiUrl}${path}`, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        ...(init?.body && !(init.body instanceof FormData)
+          ? { 'content-type': 'application/json' }
+          : {}),
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new Error('Не удалось подключиться к API. Проверь адрес сервера и попробуй ещё раз.');
+    }
+
+    throw error;
+  }
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null);
-    throw new Error(payload?.message ?? payload?.error ?? `Request failed: ${response.status}`);
+    const errorResponse = response.clone();
+    const payload = await errorResponse.json().catch(() => null);
+    const fallbackText = await response
+      .text()
+      .then((value) => value.trim())
+      .catch(() => '');
+    const errorText =
+      payload?.message ??
+      payload?.error ??
+      (fallbackText || `API request failed with status ${response.status}`);
+
+    throw new ApiError(errorText, response.status);
   }
 
   return response.json() as Promise<T>;
 }
 
 export const api = {
+  async getSession() {
+    try {
+      return await apiFetch<PrincipalSession>('/auth/me');
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return null;
+      throw error;
+    }
+  },
+  startGuestSession(token: string) {
+    return apiFetch<PrincipalSession>('/auth/guest/start', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+    });
+  },
+  endGuestSession() {
+    return apiFetch<{ ok: true }>('/auth/guest/sign-out', { method: 'POST' });
+  },
+  uploadAttachment(chatId: string, file: File, text: string, signal: AbortSignal) {
+    const form = new FormData();
+    form.append('text', text);
+    form.append('file', file);
+    return apiFetch<{ message: Message }>(`/chats/${chatId}/attachments`, {
+      method: 'POST',
+      body: form,
+      signal,
+    });
+  },
+  attachmentUrl(chatId: string, attachmentId: string, mode: 'download' | 'preview') {
+    return apiFetch<{ url: string; expiresAt: string }>(
+      `/chats/${chatId}/attachments/${attachmentId}/url?mode=${mode}`,
+    );
+  },
   searchUsers(username: string) {
     return apiFetch<{ users: PublicUser[] }>(
       `/users/search?username=${encodeURIComponent(username)}`,
@@ -92,6 +189,23 @@ export const api = {
     return apiFetch<{ chat: Chat }>(`/chats/${chatId}/members`, {
       method: 'POST',
       body: JSON.stringify({ username }),
+    });
+  },
+  createInvite(chatId: string, options?: { expiresInHours?: number; maxUses?: number | null }) {
+    return apiFetch<ChatInvite>(`/chats/${chatId}/invites`, {
+      method: 'POST',
+      ...(options ? { body: JSON.stringify(options) } : {}),
+    });
+  },
+  listInvites(chatId: string) {
+    return apiFetch<{ invites: ChatInvite[] }>(`/chats/${chatId}/invites`);
+  },
+  revokeInvite(chatId: string, inviteId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}/invites/${inviteId}`, { method: 'DELETE' });
+  },
+  joinInvite(token: string) {
+    return apiFetch<{ chatId: string }>(`/invites/${encodeURIComponent(token)}/join`, {
+      method: 'POST',
     });
   },
   getMessages(chatId: string, cursor?: string) {
@@ -119,6 +233,11 @@ export const api = {
     return apiFetch<{ chat: Chat }>(`/chats/${chatId}`, {
       method: 'PATCH',
       body: JSON.stringify({ title }),
+    });
+  },
+  deleteChat(chatId: string) {
+    return apiFetch<{ ok: true }>(`/chats/${chatId}`, {
+      method: 'DELETE',
     });
   },
   leaveGroupChat(chatId: string) {

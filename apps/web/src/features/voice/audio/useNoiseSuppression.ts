@@ -1,54 +1,33 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { LocalAudioTrack } from 'livekit-client';
 import type { TrackPublication } from 'livekit-client';
 
-import {
-  readVoiceCapturePreferences,
-  type NoiseSuppressionLevel,
-  writeVoiceCapturePreferences,
-} from './audioConstraints';
-import { createLiveKitNoiseProcessor } from './noiseProcessors';
+import type { NoiseSuppressionMode } from './audioConstraints';
+import { NoiseProcessorSession } from './noiseProcessorSession';
+import type { NoiseSuppressionRuntimeState } from './noiseProcessorSession';
 
-export function useNoiseSuppression(microphoneTrack: TrackPublication | undefined) {
-  const [noiseSuppressionLevel, setNoiseSuppressionLevel] = useState<NoiseSuppressionLevel>(
-    () => readVoiceCapturePreferences().noiseSuppressionLevel,
-  );
+export type { NoiseSuppressionRuntimeState } from './noiseProcessorSession';
 
-  useEffect(() => {
-    writeVoiceCapturePreferences({ noiseSuppressionLevel }, readVoiceCapturePreferences());
-  }, [noiseSuppressionLevel]);
-
-  const processor = useMemo(
-    () => createLiveKitNoiseProcessor(noiseSuppressionLevel),
-    [noiseSuppressionLevel],
-  );
+export function useNoiseSuppression(
+  microphoneTrack: TrackPublication | undefined,
+  noiseSuppressionMode: NoiseSuppressionMode,
+) {
+  const [session] = useState(() => new NoiseProcessorSession());
+  const [state, setState] = useState<NoiseSuppressionRuntimeState>({
+    effectiveMode: noiseSuppressionMode === 'enhanced' ? 'browser' : noiseSuppressionMode,
+    error: null,
+  });
+  const audioTrack = microphoneTrack?.audioTrack;
+  const track = audioTrack instanceof LocalAudioTrack ? audioTrack : undefined;
 
   useEffect(() => {
-    const track = microphoneTrack?.audioTrack;
-    if (!(track instanceof LocalAudioTrack)) return;
-
-    const apply = async () => {
-      try {
-        if (!processor.isSupported() || noiseSuppressionLevel === 'off') {
-          await track.stopProcessor();
-          return;
-        }
-
-        await track.setProcessor(processor);
-      } catch {
-        await track.stopProcessor();
-      }
-    };
-
-    void apply();
-
+    void session.update(track, noiseSuppressionMode, setState);
     return () => {
-      void track.stopProcessor();
+      // Coalesced with the next update for mode changes and React StrictMode replay.
+      // On unmount it drains the queue and releases the owned processor.
+      void session.update(undefined, 'off');
     };
-  }, [microphoneTrack, noiseSuppressionLevel, processor]);
+  }, [session, track, noiseSuppressionMode]);
 
-  return {
-    noiseSuppressionLevel,
-    setNoiseSuppressionLevel,
-  };
+  return state;
 }

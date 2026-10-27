@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import { getVoiceActivityThreshold, type NoiseSuppressionLevel } from './audioConstraints';
+import { getVoiceActivityThreshold, type NoiseSuppressionMode } from './audioConstraints';
 
 export function useAudioLevelMeter(
   track: MediaStreamTrack | null | undefined,
-  level: NoiseSuppressionLevel,
+  mode: NoiseSuppressionMode,
 ) {
   const [meter, setMeter] = useState(0);
 
-  const threshold = useMemo(() => getVoiceActivityThreshold(level), [level]);
+  const threshold = useMemo(() => getVoiceActivityThreshold(mode), [mode]);
 
   useEffect(() => {
     if (!track) {

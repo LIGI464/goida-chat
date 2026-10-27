@@ -11,6 +11,8 @@ COPY apps/web apps/web
 COPY packages/shared packages/shared
 
 ARG VITE_API_URL=http://api.localhost
+ARG RELEASE_SHA=development
+ENV VITE_RELEASE_SHA=$RELEASE_SHA
 ARG VITE_LIVEKIT_URL=ws://livekit.localhost
 ENV VITE_API_URL=$VITE_API_URL
 ENV VITE_LIVEKIT_URL=$VITE_LIVEKIT_URL

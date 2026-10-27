@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export * from './attachments.js';
 
 export const usernameSchema = z
   .string()
@@ -43,6 +44,17 @@ export const renameChatSchema = z.object({
   title: z.string().trim().min(1).max(100),
 });
 export const chatIdParamsSchema = z.object({ chatId: z.string().cuid() });
+export const createInviteSchema = z
+  .object({
+    expiresInHours: z.coerce.number().int().min(1).max(24 * 30).default(24 * 7),
+    maxUses: z.coerce.number().int().min(1).max(1000).nullable().default(null),
+  })
+  .default({});
+export const inviteIdParamsSchema = z.object({
+  chatId: z.string().cuid(),
+  inviteId: z.string().cuid(),
+});
+export const inviteTokenSchema = z.string().trim().min(16).max(256);
 export const paginationQuerySchema = z.object({
   cursor: z.string().cuid().optional(),
   limit: z.coerce.number().int().min(1).max(50).default(50),

@@ -1,6 +1,13 @@
-import { signInSchema, signUpSchema } from '@goida-chat/shared';
+import { LiveKitRoom } from '@livekit/components-react';
+import {
+  signInSchema,
+  signUpSchema,
+  MAX_ATTACHMENT_BYTES,
+  ATTACHMENT_ACCEPT,
+} from '@goida-chat/shared';
 import {
   type InfiniteData,
+  type QueryClient,
   useInfiniteQuery,
   useMutation,
   useQuery,
@@ -10,21 +17,49 @@ import {
   Suspense,
   lazy,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
 import { z } from 'zod';
 
-import { api, type Chat, type Message, type PublicUser } from './lib/api';
+import { GoidaLogo } from './components/brand/GoidaLogo';
+import { InviteAccessGate } from './components/InviteAccessGate';
+import { usePrincipalSession } from './lib/principal-session';
+import { pendingInvitePath } from './lib/invite-return';
+import { ChatActionsMenu, type ChatActionItem } from './components/chat/ChatActionsMenu';
+import { AttachmentCard, formatFileSize } from './components/chat/AttachmentCard';
+import { ConnectedVoiceRuntime, VoicePanel } from './components/voice/VoicePanel';
+import {
+  buildAudioCaptureOptions,
+  readVoiceCapturePreferences,
+  writeVoiceCapturePreferences,
+  type NoiseSuppressionMode,
+  type VoiceCapturePreferences,
+} from './features/voice/audio/audioConstraints';
+import { useAudioDevices } from './features/voice/audio/useAudioDevices';
+import type { NoiseSuppressionRuntimeState } from './features/voice/audio/useNoiseSuppression';
+import { usePersistentPeerVolumes } from './features/voice/audio/usePersistentPeerVolumes';
+import { api, type Chat, type Message, type PublicUser, type VoiceToken } from './lib/api';
 import { authClient } from './lib/auth-client';
 import { createChatSocket, type ChatSocket } from './lib/socket';
 
-const VoicePanel = lazy(() =>
-  import('./components/VoicePanel').then((module) => ({ default: module.VoicePanel })),
+const NoiseSuppressionLab = lazy(() =>
+  import('./components/voice/NoiseSuppressionLab').then((module) => ({
+    default: module.NoiseSuppressionLab,
+  })),
 );
 
 const TERRARIA_ROOM_NAMES = [
@@ -50,9 +85,48 @@ const registrationSchema = signUpSchema
   });
 
 type MessagesPage = { messages: Message[]; nextCursor: string | null };
-type ChatListData = { chats: Chat[] };
-type CurrentUser = { id: string; name: string; username?: string | null };
 type MessagesInfinite = InfiniteData<MessagesPage, string | null>;
+type ChatListData = { chats: Chat[] };
+type CurrentUser = { id: string; name: string; username?: string | null; isGuest?: boolean };
+type VoiceDisconnectAction = 'leave' | 'removed' | 'switch';
+
+const brandInputClassName = 'brand-input h-11 px-4 text-sm';
+const brandInputCompactClassName = 'brand-input h-10 px-3.5 text-sm';
+const brandPrimaryButtonClassName =
+  'brand-button brand-button-primary h-11 px-4 text-sm disabled:opacity-55';
+const brandPrimaryButtonCompactClassName =
+  'brand-button brand-button-primary h-10 px-4 text-sm disabled:opacity-55';
+const brandSecondaryButtonClassName =
+  'brand-button brand-button-secondary h-11 px-4 text-sm disabled:opacity-55';
+const brandSecondaryButtonCompactClassName =
+  'brand-button brand-button-secondary h-10 px-3.5 text-sm disabled:opacity-55';
+const brandGhostButtonClassName =
+  'brand-button brand-button-ghost h-9 px-2.5 text-sm disabled:opacity-55';
+const brandDangerNoticeClassName =
+  'rounded-2xl border border-[rgba(255,117,130,0.22)] bg-[rgba(84,15,28,0.34)] px-4 py-3 text-sm text-[#ffd8dd]';
+const brandSuccessNoticeClassName =
+  'rounded-2xl border border-[rgba(124,226,188,0.2)] bg-[rgba(14,58,44,0.34)] px-4 py-3 text-sm text-[#c8f7e3]';
+
+const SIDEBAR_RAIL_STORAGE_KEY = 'goida.sidebar.rail';
+const SIDEBAR_SEARCH_STORAGE_KEY = 'goida.sidebar.search-open';
+const SIDEBAR_CREATE_STORAGE_KEY = 'goida.sidebar.create-open';
+
+function readStoredBoolean(key: string, fallback: boolean) {
+  try {
+    const value = window.localStorage.getItem(key);
+    return value === null ? fallback : value === 'true';
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredBoolean(key: string, value: boolean) {
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // localStorage can be unavailable in private browsing or restricted embeds.
+  }
+}
 
 function errorMessage(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -70,8 +144,45 @@ function normalizeUserSearch(value: string) {
   return value.trim().toLowerCase().replace(/^@+/, '');
 }
 
+function profileUsernameError(value: string) {
+  const normalized = normalizeUserSearch(value);
+
+  if (!normalized) {
+    return 'Ник не может быть пустым.';
+  }
+
+  if (normalized.length < 3) {
+    return 'Ник должен быть не короче 3 символов.';
+  }
+
+  if (normalized.length > 24) {
+    return 'Ник должен быть не длиннее 24 символов.';
+  }
+
+  if (!/^[a-z0-9_]+$/.test(normalized)) {
+    return 'Используй только строчные латинские буквы, цифры и _.';
+  }
+
+  return null;
+}
+
+function groupTitleError(value: string) {
+  const normalized = value.trim();
+
+  if (!normalized) {
+    return 'Название комнаты не может быть пустым.';
+  }
+
+  if (normalized.length > 100) {
+    return 'Название комнаты должно быть не длиннее 100 символов.';
+  }
+
+  return null;
+}
+
 function formatChatTime(value?: string | null) {
   if (!value) return '';
+
   return new Intl.DateTimeFormat('ru-RU', {
     hour: '2-digit',
     minute: '2-digit',
@@ -79,7 +190,21 @@ function formatChatTime(value?: string | null) {
 }
 
 function LoadingScreen() {
-  return <main className="grid min-h-screen place-items-center text-[var(--muted)]">Загрузка...</main>;
+  return (
+    <main className="grid min-h-screen place-items-center px-4">
+      <section className="brand-card w-full max-w-sm px-6 py-7 text-center">
+        <GoidaLogo
+          className="mx-auto mb-5 block w-20"
+          imageClassName="h-auto w-full object-contain"
+          variant="mark"
+        />
+        <p className="brand-display text-lg text-[var(--text)]">Goida Chat</p>
+        <p className="mt-2 text-sm text-[var(--muted)]">
+          Поднимаем брендированное рабочее пространство…
+        </p>
+      </section>
+    </main>
+  );
 }
 
 function appendMessageToPages(
@@ -109,6 +234,79 @@ function upsertChat(data: ChatListData | undefined, chat: Chat): ChatListData | 
   return { chats: [chat, ...data.chats.filter((item) => item.id !== chat.id)] };
 }
 
+function removeChat(data: ChatListData | undefined, chatId: string): ChatListData | undefined {
+  if (!data) return data;
+  return { chats: data.chats.filter((chat) => chat.id !== chatId) };
+}
+
+function clearChatClientState(queryClient: QueryClient, chatId: string) {
+  queryClient.setQueryData<ChatListData>(['chats'], (old) => removeChat(old, chatId));
+  queryClient.removeQueries({ queryKey: ['messages', chatId] });
+  queryClient.removeQueries({ queryKey: ['voicePresence', chatId] });
+}
+
+function canDeleteChat(chat: Chat, currentUserId: string) {
+  return chat.type === 'group' && chat.createdById === currentUserId;
+}
+
+function unavailableDirectChatAction(): ChatActionItem {
+  return {
+    label: 'Личный чат нельзя удалить для всех',
+    disabled: true,
+    onSelect: () => {},
+  };
+}
+
+function buildGroupChatActionItems({
+  allowDelete,
+  disabled,
+  onDelete,
+  onLeave,
+  onManage,
+}: {
+  allowDelete: boolean;
+  disabled: boolean;
+  onDelete: () => void;
+  onLeave: () => void;
+  onManage: () => void;
+}): ChatActionItem[] {
+  return [
+    {
+      label: 'Пригласить или переименовать',
+      disabled,
+      onSelect: onManage,
+    },
+    {
+      label: 'Выйти из комнаты',
+      disabled,
+      onSelect: () => {
+        if (!window.confirm('Выйти из этой комнаты?')) {
+          return;
+        }
+
+        onLeave();
+      },
+    },
+    {
+      label: 'Удалить чат',
+      disabled,
+      hidden: !allowDelete,
+      tone: 'danger',
+      onSelect: () => {
+        if (
+          !window.confirm(
+            'Удалить чат для всех участников? Сообщения и голосовая комната тоже исчезнут.',
+          )
+        ) {
+          return;
+        }
+
+        onDelete();
+      },
+    },
+  ];
+}
+
 function patchChatsWithMessage(
   data: ChatListData | undefined,
   message: Message,
@@ -122,7 +320,9 @@ function patchChatsWithMessage(
 
   const current = data.chats[index]!;
   const unreadCount =
-    message.userId === currentUserId || current.id === selectedChatId ? 0 : (current.unreadCount ?? 0) + 1;
+    message.userId === currentUserId || current.id === selectedChatId
+      ? 0
+      : (current.unreadCount ?? 0) + 1;
   const updated: Chat = {
     ...current,
     lastMessage: message,
@@ -137,22 +337,103 @@ function patchChatsWithMessage(
   return { chats };
 }
 
+function patchChatsWithUser(
+  data: ChatListData | undefined,
+  user: PublicUser,
+  currentUserId: string | null,
+): ChatListData | undefined {
+  if (!data) return data;
+
+  return {
+    chats: data.chats.map((chat) => {
+      const members = chat.members.map((member) =>
+        member.user.id === user.id ? { ...member, user: { ...member.user, ...user } } : member,
+      );
+      const lastMessage =
+        chat.lastMessage?.user.id === user.id
+          ? { ...chat.lastMessage, user: { ...chat.lastMessage.user, ...user } }
+          : chat.lastMessage;
+      const directPeer =
+        chat.type === 'direct'
+          ? members.find((member) => member.user.id !== currentUserId)?.user
+          : null;
+
+      return {
+        ...chat,
+        members,
+        lastMessage,
+        displayTitle:
+          chat.type === 'direct'
+            ? `@${directPeer?.username ?? directPeer?.name ?? 'unknown'}`
+            : (chat.displayTitle ?? chat.title ?? null),
+      };
+    }),
+  };
+}
+
+function patchMessagesWithUser(
+  data: MessagesInfinite | undefined,
+  user: PublicUser,
+): MessagesInfinite | undefined {
+  if (!data) return data;
+
+  return {
+    ...data,
+    pages: data.pages.map((page) => ({
+      ...page,
+      messages: page.messages.map((message) =>
+        message.user.id === user.id ? { ...message, user: { ...message.user, ...user } } : message,
+      ),
+    })),
+  };
+}
+
+function patchUsersArray(users: PublicUser[] | undefined, user: PublicUser) {
+  if (!users) return users;
+  return users.map((item) => (item.id === user.id ? { ...item, ...user } : item));
+}
+
+function patchUserCaches(queryClient: QueryClient, user: PublicUser, currentUserId: string | null) {
+  queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+    patchChatsWithUser(old, user, currentUserId),
+  );
+
+  for (const [queryKey] of queryClient.getQueriesData<MessagesInfinite>({
+    queryKey: ['messages'],
+  })) {
+    queryClient.setQueryData<MessagesInfinite>(queryKey, (old) => patchMessagesWithUser(old, user));
+  }
+
+  for (const [queryKey] of queryClient.getQueriesData<{ users: PublicUser[] }>({
+    queryKey: ['voicePresence'],
+  })) {
+    queryClient.setQueryData<{ users: PublicUser[] }>(queryKey, (old) =>
+      old ? { users: patchUsersArray(old.users, user) ?? [] } : old,
+    );
+  }
+}
+
 function PublicOnly({ children }: { children: ReactNode }) {
-  const { data, isPending } = authClient.useSession();
+  const { data, isPending } = usePrincipalSession();
   if (isPending) return <LoadingScreen />;
-  if (data) return <Navigate to="/app" replace />;
+  if (data?.kind === 'user') return <Navigate replace to={pendingInvitePath() ?? '/app'} />;
   return children;
 }
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const { data, isPending } = authClient.useSession();
+  const { data, isPending } = usePrincipalSession();
+  const guestReturn = useRef<string | null>(null);
+  useEffect(() => {
+    if (data?.kind === 'guest' && data.inviteToken) guestReturn.current = `/invite/${encodeURIComponent(data.inviteToken)}`;
+  }, [data?.kind, data?.inviteToken]);
   if (isPending) return <LoadingScreen />;
-  if (!data) return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+  if (!data) return <Navigate replace state={{ from: location.pathname }} to={guestReturn.current ?? '/login'} />;
   return children;
 }
 
 function AuthCard({ mode }: { mode: 'login' | 'register' }) {
+  const queryClient = useQueryClient();
   const register = mode === 'register';
   const navigate = useNavigate();
   const location = useLocation();
@@ -189,11 +470,14 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
         if (result.error) throw result.error;
       }
 
-      const from = (location.state as { from?: string } | null)?.from ?? '/app';
+      await api.endGuestSession();
+      const from = pendingInvitePath() ?? (location.state as { from?: string } | null)?.from ?? '/app';
+      queryClient.clear();
+      queryClient.setQueryData(['session'], await api.getSession());
       navigate(from, { replace: true });
     } catch (caught) {
       if (caught instanceof z.ZodError) {
-        setError(caught.issues[0]?.message ?? 'Проверь введённые данные');
+        setError(caught.issues[0]?.message ?? 'Проверь введённые данные.');
       } else {
         setError(errorMessage(caught));
       }
@@ -203,72 +487,131 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center p-4">
-      <section className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-6 shadow-xl">
-        <h1 className="mb-1 text-2xl font-semibold">{register ? 'Регистрация' : 'Вход'}</h1>
-        <p className="mb-5 text-sm text-[var(--muted)]">
-          {register ? 'Создай приватный аккаунт' : 'С возвращением'}
-        </p>
-        <form className="grid gap-3" onSubmit={submit}>
-          <input
-            autoComplete="email"
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            onChange={(event) => setEmail(event.target.value)}
-            placeholder="Email"
-            required
-            type="email"
-            value={email}
-          />
-          {register && (
-            <input
-              autoComplete="username"
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              maxLength={24}
-              minLength={3}
-              onChange={(event) => setUsername(event.target.value.toLowerCase())}
-              pattern="[a-z0-9_]+"
-              placeholder="username"
-              required
-              value={username}
+    <main className="grid min-h-screen overflow-hidden px-4 py-8 sm:px-6 lg:px-8">
+      <section className="brand-card relative mx-auto grid w-full max-w-6xl overflow-hidden lg:grid-cols-[1.05fr_0.95fr]">
+        <div className="relative hidden min-h-[620px] overflow-hidden border-r brand-divider px-8 py-10 lg:flex lg:flex-col lg:justify-between xl:px-12">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.09),transparent_28%),linear-gradient(140deg,rgba(255,255,255,0.03),transparent_42%)]" />
+          <div className="relative">
+            <div className="brand-pill brand-eyebrow mb-6 text-[11px] text-[var(--muted-strong)]">
+              Goida Chat
+            </div>
+            <GoidaLogo
+              className="block max-w-[430px]"
+              imageClassName="h-auto w-full object-contain"
+              variant="lockup"
             />
-          )}
-          <input
-            autoComplete={register ? 'new-password' : 'current-password'}
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            minLength={8}
-            onChange={(event) => setPassword(event.target.value)}
-            placeholder="Пароль"
-            required
-            type="password"
-            value={password}
-          />
-          {register && (
-            <input
-              autoComplete="new-password"
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              minLength={8}
-              onChange={(event) => setRepeatPassword(event.target.value)}
-              placeholder="Повтори пароль"
-              required
-              type="password"
-              value={repeatPassword}
-            />
-          )}
-          {error && (
-            <p className="rounded-lg border border-red-900 bg-red-950/50 px-3 py-2 text-sm text-red-300">
-              {error}
+            <h1 className="brand-display mt-10 max-w-lg text-4xl leading-[1.05] font-semibold text-[var(--text)] xl:text-5xl">
+              Приватные чаты, комнаты и голос — без лишнего шума.
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-7 text-[var(--muted-strong)]">
+              Общайся, создавай комнаты и возвращайся к звонкам в одном спокойном пространстве.
             </p>
-          )}
-          <button
-            className="h-9 rounded-xl bg-[var(--accent)] px-3 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-            disabled={pending}
-          >
-            {pending ? 'Подожди...' : register ? 'Создать аккаунт' : 'Войти'}
-          </button>
-        </form>
-        <Link className="mt-4 block text-sm text-[var(--accent)]" to={register ? '/login' : '/register'}>
-          {register ? 'Уже есть аккаунт' : 'Создать аккаунт'}
-        </Link>
+          </div>
+
+          <div className="relative grid gap-3 xl:max-w-[480px]">
+            <div className="brand-surface px-5 py-4">
+              <p className="brand-display text-sm font-semibold text-[var(--text)]">
+                Всё под рукой
+              </p>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                Личные чаты, комнаты и голосовые сессии рядом — без лишних переходов.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2 text-xs text-[var(--muted-strong)]">
+              <span className="brand-pill">Приватные комнаты</span>
+              <span className="brand-pill">Голосовые сессии</span>
+              <span className="brand-pill">Без лишнего шума</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative px-5 py-6 sm:px-8 sm:py-8 lg:px-10 lg:py-10">
+          <div className="mx-auto flex min-h-full w-full max-w-md flex-col justify-center">
+            <div className="mb-8 lg:hidden">
+              <GoidaLogo
+                className="block max-w-[270px]"
+                imageClassName="h-auto w-full object-contain"
+                variant="lockup"
+              />
+            </div>
+
+            <div className="brand-eyebrow mb-3 text-[11px] text-[var(--muted)]">
+              {register ? 'Создание аккаунта' : 'С возвращением'}
+            </div>
+            <h1 className="brand-display mb-2 text-3xl font-semibold text-[var(--text)]">
+              {register ? 'Зарегистрироваться' : 'Вход'}
+            </h1>
+            <p className="mb-6 text-sm leading-6 text-[var(--muted)]">
+              {register
+                ? 'Создай аккаунт, чтобы общаться в чатах, комнатах и голосовых сессиях.'
+                : 'Вернись к своим чатам, комнатам и голосовым сессиям.'}
+            </p>
+
+            <form className="grid gap-3" onSubmit={submit}>
+              <input
+                autoComplete="email"
+                className={brandInputClassName}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="Email"
+                required
+                type="email"
+                value={email}
+              />
+
+              {register && (
+                <input
+                  autoComplete="username"
+                  className={brandInputClassName}
+                  maxLength={24}
+                  minLength={3}
+                  onChange={(event) => setUsername(event.target.value.toLowerCase())}
+                  pattern="[a-z0-9_]+"
+                  placeholder="Ник"
+                  required
+                  value={username}
+                />
+              )}
+
+              <input
+                autoComplete={register ? 'new-password' : 'current-password'}
+                className={brandInputClassName}
+                minLength={8}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Пароль"
+                required
+                type="password"
+                value={password}
+              />
+
+              {register && (
+                <input
+                  autoComplete="new-password"
+                  className={brandInputClassName}
+                  minLength={8}
+                  onChange={(event) => setRepeatPassword(event.target.value)}
+                  placeholder="Повтори пароль"
+                  required
+                  type="password"
+                  value={repeatPassword}
+                />
+              )}
+
+              {error && <p className={brandDangerNoticeClassName}>{error}</p>}
+
+              <button className={brandPrimaryButtonClassName} disabled={pending}>
+                {pending ? 'Подожди...' : register ? 'Зарегистрироваться' : 'Войти'}
+              </button>
+            </form>
+
+            <Link
+              className="brand-link mt-5 inline-flex w-fit text-sm"
+              to={register ? '/login' : '/register'}
+              state={location.state}
+            >
+              {register ? 'Уже есть аккаунт? Войти' : 'Создать аккаунт'}
+            </Link>
+          </div>
+        </div>
       </section>
     </main>
   );
@@ -280,6 +623,7 @@ function UserSearchResults({
   emptyLabel,
   actionLabel,
   disabledUsername,
+  actionDisabled = false,
   onAction,
 }: {
   users: PublicUser[];
@@ -287,6 +631,7 @@ function UserSearchResults({
   emptyLabel: string;
   actionLabel: string;
   disabledUsername?: string | null;
+  actionDisabled?: boolean;
   onAction: (username: string) => void;
 }) {
   if (isPending) {
@@ -301,19 +646,19 @@ function UserSearchResults({
     <>
       {users.map((user) => {
         const username = user.username ?? '';
-        const disabled = disabledUsername === username;
+        const disabled = actionDisabled || disabledUsername === username;
 
         return (
           <div
-            className="flex items-center justify-between gap-3 rounded-xl px-2 py-2 transition-colors duration-150 hover:bg-white/5"
+            className="flex items-center justify-between gap-3 rounded-2xl px-2.5 py-2.5 transition-colors duration-150 hover:bg-white/5"
             key={user.id}
           >
             <div className="min-w-0">
-              <p className="truncate text-sm font-medium">@{username}</p>
+              <p className="truncate text-sm font-medium">@{username || user.name}</p>
               <p className="truncate text-xs text-[var(--muted)]">{user.name || 'Игрок'}</p>
             </div>
             <button
-              className="h-8 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-2 text-xs text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="brand-button brand-button-secondary h-8 rounded-xl px-3 text-xs font-semibold disabled:opacity-55"
               disabled={disabled || !username}
               onClick={() => username && onAction(username)}
               type="button"
@@ -334,30 +679,51 @@ function ProfileDialog({
 }: {
   username: string;
   onClose: () => void;
-  onSaved: (username: string) => void;
+  onSaved: (user: PublicUser) => void;
 }) {
   const [nextUsername, setNextUsername] = useState(username);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const mutation = useMutation({
     mutationFn: api.updateProfile,
     onSuccess: ({ user }) => {
-      onSaved(user.username ?? nextUsername.trim().toLowerCase());
+      setValidationError(null);
+      onSaved(user);
     },
   });
+  const normalizedUsername = normalizeUserSearch(nextUsername);
+  const currentUsername = normalizeUserSearch(username);
+
+  function handleUsernameChange(value: string) {
+    setNextUsername(value.toLowerCase());
+    setValidationError(null);
+    if (mutation.error) mutation.reset();
+  }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    mutation.mutate(nextUsername.trim().toLowerCase());
+
+    const nextError = profileUsernameError(nextUsername);
+    if (nextError) {
+      setValidationError(nextError);
+      return;
+    }
+
+    setValidationError(null);
+    mutation.mutate(normalizedUsername);
   }
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
-      <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-5 shadow-2xl">
+    <div className="brand-overlay fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="brand-modal w-full max-w-sm p-5">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Профиль</h2>
-            <p className="text-sm text-[var(--muted)]">Пока только ник, без лишнего шума.</p>
+            <p className="brand-eyebrow text-[11px] text-[var(--muted)]">Identity</p>
+            <h2 className="brand-display mt-2 text-lg font-semibold text-[var(--text)]">Профиль</h2>
+            <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+              Пока только ник, без лишнего шума.
+            </p>
           </div>
-          <button className="text-sm text-[var(--muted)] hover:text-[var(--text)]" onClick={onClose} type="button">
+          <button className={brandGhostButtonClassName} onClick={onClose} type="button">
             Закрыть
           </button>
         </div>
@@ -366,19 +732,25 @@ function ProfileDialog({
           <label className="grid gap-2">
             <span className="text-sm text-[var(--muted)]">Ник</span>
             <input
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-              maxLength={24}
-              minLength={3}
-              onChange={(event) => setNextUsername(event.target.value.toLowerCase())}
-              pattern="[a-z0-9_]+"
-              required
+              autoComplete="username"
+              className={brandInputClassName}
+              maxLength={25}
+              onChange={(event) => handleUsernameChange(event.target.value)}
+              placeholder="@username"
+              spellCheck={false}
               value={nextUsername}
             />
           </label>
-          {mutation.error && <p className="text-sm text-[var(--danger)]">{errorMessage(mutation.error)}</p>}
+
+          {(validationError || mutation.error) && (
+            <p className={brandDangerNoticeClassName}>
+              {validationError ?? errorMessage(mutation.error)}
+            </p>
+          )}
+
           <button
-            className="h-9 rounded-xl bg-[var(--accent)] px-3 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
-            disabled={mutation.isPending}
+            className={brandPrimaryButtonClassName}
+            disabled={mutation.isPending || normalizedUsername === currentUsername}
           >
             {mutation.isPending ? 'Сохраняю...' : 'Сохранить ник'}
           </button>
@@ -389,32 +761,48 @@ function ProfileDialog({
 }
 
 function ChatSidebar({
+  collapsed,
   chats,
   currentUser,
   selectedChatId,
   socket,
+  onOpenGroupManager,
   onOpenProfile,
   onSelect,
   onSignOut,
+  onToggleCollapsed,
 }: {
+  collapsed: boolean;
   chats: Chat[];
   currentUser: CurrentUser;
   selectedChatId: string | null;
   socket: ChatSocket | null;
+  onOpenGroupManager: (chatId: string) => void;
   onOpenProfile: () => void;
-  onSelect: (chatId: string) => void;
+  onSelect: (chatId: string | null) => void;
   onSignOut: () => void;
+  onToggleCollapsed: () => void;
 }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(() =>
+    readStoredBoolean(SIDEBAR_SEARCH_STORAGE_KEY, true),
+  );
+  const [createOpen, setCreateOpen] = useState(() =>
+    readStoredBoolean(SIDEBAR_CREATE_STORAGE_KEY, true),
+  );
   const [groupTitle, setGroupTitle] = useState(() => randomRoomTitle());
   const [groupMembers, setGroupMembers] = useState('');
+  const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const normalizedSearch = normalizeUserSearch(search);
 
   const userSearch = useQuery({
     queryKey: ['users', normalizedSearch],
     queryFn: () => api.searchUsers(normalizedSearch),
-    enabled: normalizedSearch.length >= 3,
+    enabled: !currentUser.isGuest && normalizedSearch.length >= 3,
   });
 
   const directMutation = useMutation({
@@ -434,6 +822,57 @@ function ChatSidebar({
       onSelect(chat.id);
       setGroupTitle(randomRoomTitle());
       setGroupMembers('');
+      setCreatedGroupId(chat.id);
+      setInviteLink(null);
+      setInviteStatus(null);
+    },
+  });
+
+  const inviteMutation = useMutation({
+    mutationFn: (chatId: string) => api.createInvite(chatId),
+    onSuccess: async ({ token }) => {
+      const url = `${window.location.origin}/invite/${token}`;
+      setInviteLink(url);
+      try {
+        if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(url);
+        setInviteStatus('Ссылка создана и скопирована.');
+      } catch {
+        setInviteStatus('Ссылка создана. Скопируй её из поля ниже.');
+      }
+    },
+    onError: (caught) => setInviteStatus(errorMessage(caught)),
+  });
+
+  const deleteChatMutation = useMutation({
+    mutationFn: api.deleteChat,
+    onSuccess: (_, chatId) => {
+      clearChatClientState(queryClient, chatId);
+      setActionError(null);
+      if (selectedChatId === chatId) {
+        onSelect(null);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
+    },
+  });
+
+  const leaveChatMutation = useMutation({
+    mutationFn: api.leaveGroupChat,
+    onSuccess: (_, chatId) => {
+      clearChatClientState(queryClient, chatId);
+      setActionError(null);
+      if (selectedChatId === chatId) {
+        onSelect(null);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
     },
   });
 
@@ -455,15 +894,18 @@ function ChatSidebar({
     };
 
     const presenceUpdate = (payload: { userId: string; isOnline: boolean }) => {
-      queryClient.setQueryData<{ chats: Chat[] }>(['chats'], (old) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) => {
         if (!old) return old;
+
         return {
           chats: old.chats.map((chat) => {
             const memberIds = new Set(chat.members.map((member) => member.user.id));
             if (!memberIds.has(payload.userId)) return chat;
+
             const nextOnline = new Set(chat.onlineMemberIds ?? []);
             if (payload.isOnline) nextOnline.add(payload.userId);
             else nextOnline.delete(payload.userId);
+
             return { ...chat, onlineMemberIds: [...nextOnline] };
           }),
         };
@@ -479,89 +921,369 @@ function ChatSidebar({
     };
   }, [queryClient, socket]);
 
-  return (
-    <aside className="flex min-h-screen flex-col border-r border-[var(--border)] bg-[var(--panel)] p-4">
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-sm text-[var(--muted)]">Чаты</p>
-          <p className="text-xs text-[var(--muted)]">Личные и общие в одном списке</p>
+  useEffect(() => {
+    writeStoredBoolean(SIDEBAR_SEARCH_STORAGE_KEY, searchOpen);
+  }, [searchOpen]);
+
+  useEffect(() => {
+    writeStoredBoolean(SIDEBAR_CREATE_STORAGE_KEY, createOpen);
+  }, [createOpen]);
+
+  function handleChatListKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    const currentIndex = Number(target.dataset.chatIndex ?? -1);
+    if (currentIndex < 0 || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+
+    event.preventDefault();
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? chats.length - 1
+          : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + chats.length) % chats.length;
+    const next = event.currentTarget.querySelector<HTMLElement>(`[data-chat-index="${nextIndex}"]`);
+    next?.focus();
+  }
+
+  if (currentUser.isGuest) return (
+    <aside className="flex h-full flex-col gap-4 border-r brand-divider p-4">
+      <GoidaLogo variant="lockup" />
+      <p className="text-sm">{currentUser.name}</p>
+      <p className="text-sm text-[var(--muted)]">Гостевой доступ: только приглашённая комната, до двух часов.</p>
+      {chats.map((chat) => <button className={brandSecondaryButtonClassName} key={chat.id} onClick={() => onSelect(chat.id)} type="button">{chat.displayTitle ?? chat.title ?? 'Комната'}</button>)}
+      <button className={`${brandSecondaryButtonClassName} mt-auto`} onClick={onSignOut} type="button">Завершить гостевую сессию</button>
+    </aside>
+  );
+
+  if (collapsed) {
+    return (
+      <aside
+        aria-label="Свернутая панель навигации"
+        className="flex h-full min-h-0 flex-col items-center overflow-hidden border-r brand-divider bg-[linear-gradient(180deg,rgba(14,15,18,0.98),rgba(8,9,11,0.98))] px-2 py-3"
+      >
+        <div className="flex w-full flex-col items-center gap-3">
+          <GoidaLogo
+            alt="Goida"
+            className="block w-12"
+            imageClassName="h-auto w-full object-contain"
+            variant="mark"
+          />
+          <button
+            aria-label="Развернуть панель навигации"
+            className={`${brandSecondaryButtonCompactClassName} h-10 w-10 px-0 text-lg`}
+            onClick={onToggleCollapsed}
+            title="Развернуть панель"
+            type="button"
+          >
+            →
+          </button>
+          <div className="mt-2 flex w-full flex-col items-center gap-2 border-t brand-divider pt-3">
+            <button
+              aria-label="Открыть поиск пользователей"
+              className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-lg`}
+              onClick={() => {
+                setSearchOpen(true);
+                onToggleCollapsed();
+              }}
+              title="Поиск"
+              type="button"
+            >
+              ⌕
+            </button>
+            <button
+              aria-label="Открыть создание комнаты"
+              className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-lg`}
+              onClick={() => {
+                setCreateOpen(true);
+                onToggleCollapsed();
+              }}
+              title="Новая комната"
+              type="button"
+            >
+              +
+            </button>
+            <button
+              aria-label="Открыть профиль"
+              className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-lg`}
+              onClick={onOpenProfile}
+              title="Профиль"
+              type="button"
+            >
+              ◉
+            </button>
+          </div>
         </div>
-        <button className="text-xs text-[var(--muted)] hover:text-[var(--text)]" onClick={onSignOut} type="button">
-          Выйти
-        </button>
+        <div className="mt-auto flex w-full flex-col items-center gap-2">
+          <button
+            aria-label={`Профиль @${currentUser.username ?? currentUser.name}`}
+            className="brand-surface-muted grid h-10 w-10 place-items-center rounded-xl text-sm font-semibold text-[var(--text)]"
+            onClick={onOpenProfile}
+            title={`@${currentUser.username ?? currentUser.name}`}
+            type="button"
+          >
+            {(currentUser.username ?? currentUser.name).slice(0, 1).toUpperCase()}
+          </button>
+          <button
+            aria-label="Выйти"
+            className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-xs`}
+            onClick={onSignOut}
+            title="Выйти"
+            type="button"
+          >
+            ↪
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
+  return (
+    <aside
+      aria-label="Навигация Goida Chat"
+      className="flex h-full min-h-0 flex-col overflow-hidden border-r brand-divider bg-[linear-gradient(180deg,rgba(14,15,18,0.98),rgba(8,9,11,0.98))] p-4"
+    >
+      <div className="mb-4 brand-card min-h-[118px] px-4 pt-4 pb-3">
+        <div className="flex h-full items-start justify-between gap-3">
+          <div className="min-w-0 self-end pt-5">
+            <GoidaLogo
+              className="block max-w-[228px]"
+              imageClassName="h-auto w-full object-contain"
+              variant="lockup"
+            />
+          </div>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              aria-label="Свернуть панель навигации"
+              className={`${brandGhostButtonClassName} h-9 w-9 px-0 text-lg`}
+              onClick={onToggleCollapsed}
+              title="Свернуть панель"
+              type="button"
+            >
+              ←
+            </button>
+            <button
+              aria-label="Выйти"
+              className={`${brandGhostButtonClassName} h-9 shrink-0 whitespace-nowrap px-3`}
+              onClick={onSignOut}
+              type="button"
+            >
+              Выйти
+            </button>
+          </div>
+        </div>
       </div>
 
-      <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
-        <div className="mb-2 flex items-center justify-between gap-3">
-          <p className="text-sm text-[var(--muted)]">Поиск @username</p>
-          <span className="rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] text-[var(--muted)]">
-            чат
-          </span>
+      <section className="brand-surface shrink-0 p-3" aria-labelledby="sidebar-search-heading">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Search</p>
+            <p className="mt-1 text-sm text-[var(--muted-strong)]" id="sidebar-search-heading">
+              Личная комната
+            </p>
+          </div>
+          <button
+            aria-controls="sidebar-search-panel"
+            aria-expanded={searchOpen}
+            aria-label={searchOpen ? 'Свернуть поиск' : 'Развернуть поиск'}
+            className={`${brandGhostButtonClassName} h-8 w-8 px-0 text-lg`}
+            onClick={() => setSearchOpen((value) => !value)}
+            type="button"
+          >
+            {searchOpen ? '−' : '+'}
+          </button>
         </div>
-        <input
-          className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Напиши ник"
-          value={search}
-        />
-        {normalizedSearch.length >= 3 && (
-          <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--bg)] p-2">
-            <UserSearchResults
-              actionLabel="Создать"
-              disabledUsername={null}
-              emptyLabel="Никого не нашёл"
-              isPending={userSearch.isPending}
-              onAction={(username) => directMutation.mutate(username)}
-              users={userSearch.data?.users ?? []}
+
+        {searchOpen && (
+          <div className="mt-3" id="sidebar-search-panel">
+            <input
+              aria-label="Поиск пользователя по имени"
+              className={brandInputCompactClassName}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Напиши @username"
+              value={search}
             />
-            {directMutation.error && (
-              <p className="p-2 text-xs text-[var(--danger)]">{errorMessage(directMutation.error)}</p>
+
+            {normalizedSearch.length >= 3 && (
+              <div className="brand-surface-muted app-scrollbar mt-3 max-h-48 overflow-y-auto overflow-x-hidden p-2">
+                <UserSearchResults
+                  actionLabel="Создать"
+                  disabledUsername={null}
+                  emptyLabel="Никого не нашёл"
+                  isPending={userSearch.isPending}
+                  onAction={(username) => directMutation.mutate(username)}
+                  users={userSearch.data?.users ?? []}
+                />
+                {directMutation.error && (
+                  <p className="p-2 text-xs text-[var(--danger)]">
+                    {errorMessage(directMutation.error)}
+                  </p>
+                )}
+              </div>
             )}
           </div>
         )}
-      </div>
+      </section>
 
-      <form className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3" onSubmit={createGroup}>
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <p className="text-sm text-[var(--muted)]">Новая комната</p>
+      <section className="brand-surface mt-3 shrink-0 p-3" aria-labelledby="sidebar-create-heading">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Create room</p>
+            <p className="mt-1 text-sm text-[var(--muted-strong)]" id="sidebar-create-heading">
+              Групповая комната
+            </p>
+          </div>
           <button
-            className="text-xs text-[var(--accent)] hover:text-[var(--accent-hover)]"
-            onClick={() => setGroupTitle(randomRoomTitle())}
+            aria-controls="sidebar-create-panel"
+            aria-expanded={createOpen}
+            aria-label={createOpen ? 'Свернуть создание комнаты' : 'Развернуть создание комнаты'}
+            className={`${brandGhostButtonClassName} h-8 w-8 px-0 text-lg`}
+            onClick={() => setCreateOpen((value) => !value)}
             type="button"
           >
-            рандом
+            {createOpen ? '−' : '+'}
           </button>
         </div>
-        <input
-          className="mb-2 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
-          onChange={(event) => setGroupTitle(event.target.value)}
-          placeholder="Название комнаты"
-          value={groupTitle}
-        />
-        <input
-          className="mb-2 h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
-          onChange={(event) => setGroupMembers(event.target.value)}
-          placeholder="@user1, @user2"
-          value={groupMembers}
-        />
-        <button
-          className="h-9 w-full rounded-xl bg-[var(--accent)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)] disabled:opacity-50"
-          disabled={groupMutation.isPending}
-        >
-          {groupMutation.isPending ? 'Создаю...' : 'Создать комнату'}
-        </button>
-        {groupMutation.error && (
-          <p className="mt-2 text-xs text-[var(--danger)]">{errorMessage(groupMutation.error)}</p>
-        )}
-      </form>
 
-      <div className="mt-3 min-h-0 flex-1 overflow-auto pr-1">
-        {chats.length === 0 && <p className="mt-8 text-sm text-[var(--muted)]">Пока пусто</p>}
+        {createOpen && (
+          <form className="mt-3 grid gap-2" id="sidebar-create-panel" onSubmit={createGroup}>
+            <div className="flex items-center justify-end">
+              <button
+                aria-label="Сгенерировать случайное название комнаты"
+                className="brand-link text-xs"
+                onClick={() => setGroupTitle(randomRoomTitle())}
+                type="button"
+              >
+                Random
+              </button>
+            </div>
+            <input
+              aria-label="Название групповой комнаты"
+              className={brandInputCompactClassName}
+              onChange={(event) => setGroupTitle(event.target.value)}
+              placeholder="Название комнаты"
+              value={groupTitle}
+            />
+            <input
+              aria-label="Участники групповой комнаты"
+              className={brandInputCompactClassName}
+              onChange={(event) => setGroupMembers(event.target.value)}
+              placeholder="@user1, @user2"
+              value={groupMembers}
+            />
+            <button
+              aria-label="Создать групповую комнату"
+              className={`${brandPrimaryButtonCompactClassName} w-full`}
+              disabled={groupMutation.isPending}
+              type="submit"
+            >
+              {groupMutation.isPending ? 'Создаю...' : 'Создать комнату'}
+            </button>
+            {groupMutation.error && (
+              <p className="text-xs text-[var(--danger)]">{errorMessage(groupMutation.error)}</p>
+            )}
+
+            {createdGroupId && (
+              <div className="grid gap-2 border-t brand-divider pt-3">
+                <p className="text-xs text-[var(--muted)]">
+                  Комната создана. Пригласи участников по одноразовой ссылке.
+                </p>
+                <button
+                  aria-label="Создать и скопировать invite-ссылку"
+                  className={brandSecondaryButtonCompactClassName}
+                  disabled={inviteMutation.isPending}
+                  onClick={() => inviteMutation.mutate(createdGroupId)}
+                  type="button"
+                >
+                  {inviteMutation.isPending ? 'Создаю ссылку...' : 'Создать invite-ссылку'}
+                </button>
+                {inviteLink && (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <input
+                      aria-label="Invite-ссылка"
+                      className={`${brandInputCompactClassName} min-w-0 flex-1 text-xs`}
+                      readOnly
+                      value={inviteLink}
+                    />
+                    <button
+                      aria-label="Скопировать invite-ссылку"
+                      className={`${brandGhostButtonClassName} h-10 shrink-0 px-3 text-xs`}
+                      onClick={() => {
+                        if (!navigator.clipboard) { setInviteStatus('Скопируй ссылку из поля.'); return; }
+                        void navigator.clipboard.writeText(inviteLink).then(
+                          () => setInviteStatus('Ссылка скопирована.'),
+                          () => setInviteStatus('Скопируй ссылку из поля.'),
+                        );
+                      }}
+                      type="button"
+                    >
+                      Копировать
+                    </button>
+                  </div>
+                )}
+                {inviteStatus && (
+                  <p
+                    className={
+                      inviteStatus.includes('ош')
+                        ? 'text-xs text-[var(--danger)]'
+                        : 'text-xs text-[var(--success)]'
+                    }
+                  >
+                    {inviteStatus}
+                  </p>
+                )}
+              </div>
+            )}
+          </form>
+        )}
+      </section>
+
+      <div
+        aria-label="Список чатов"
+        className="app-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+        onKeyDown={handleChatListKeyDown}
+        role="listbox"
+        tabIndex={-1}
+      >
+        {actionError && <p className={`mb-3 ${brandDangerNoticeClassName}`}>{actionError}</p>}
+        {chats.length === 0 && (
+          <div className="brand-surface mt-6 grid place-items-center px-4 py-6 text-center">
+            <GoidaLogo
+              className="mb-4 block w-16"
+              imageClassName="h-auto w-full object-contain opacity-90"
+              variant="mark"
+            />
+            <p className="text-sm text-[var(--muted)]">
+              Пока пусто. Создай первый чат или комнату.
+            </p>
+          </div>
+        )}
+
         {chats.map((chat) => {
           const active = chat.id === selectedChatId;
+          const allowDelete = canDeleteChat(chat, currentUser.id);
+          const actionPending = leaveChatMutation.isPending || deleteChatMutation.isPending;
+          const actionItems =
+            chat.type === 'group'
+              ? buildGroupChatActionItems({
+                  allowDelete,
+                  disabled: actionPending,
+                  onDelete: () => {
+                    setActionError(null);
+                    deleteChatMutation.mutate(chat.id);
+                  },
+                  onLeave: () => {
+                    setActionError(null);
+                    leaveChatMutation.mutate(chat.id);
+                  },
+                  onManage: () => {
+                    setActionError(null);
+                    onOpenGroupManager(chat.id);
+                  },
+                })
+              : [unavailableDirectChatAction()];
           const members = chat.members
             .filter((member) => member.user.id !== currentUser.id)
-            .map((member) => `@${member.user.username}`)
+            .map((member) => `@${member.user.username ?? member.user.name}`)
             .join(', ');
           const lastTime = formatChatTime(chat.lastMessage?.createdAt);
           const unread = chat.unreadCount ?? 0;
@@ -571,39 +1293,70 @@ function ChatSidebar({
             ).length ?? 0;
 
           return (
-            <button
-              className={`mb-2 w-full rounded-xl border px-3 py-3 text-left transition-colors duration-150 ${
+            <div
+              className={`group mb-2 flex items-start gap-2 rounded-[1.35rem] border p-2 transition-colors duration-150 ${
                 active
-                  ? 'border-[var(--accent)] bg-[var(--accent)]/10'
-                  : 'border-[var(--border)] bg-[var(--panel-2)] hover:bg-[var(--panel)]'
+                  ? 'border-[var(--halo-strong)] bg-white/[0.06] shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_0_26px_rgba(255,255,255,0.08)]'
+                  : 'border-[var(--border)] bg-[linear-gradient(180deg,rgba(24,26,30,0.98),rgba(15,16,19,0.98))] hover:border-[var(--border-strong)] hover:bg-[linear-gradient(180deg,rgba(28,30,35,1),rgba(18,19,22,1))]'
               }`}
               key={chat.id}
-              onClick={() => onSelect(chat.id)}
+              role="option"
+              aria-selected={active}
             >
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
-                <div className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
-                  {onlineCount > 0 && <span>{onlineCount} online</span>}
-                  {lastTime && <span>{lastTime}</span>}
-                  {unread > 0 && <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-white">{unread}</span>}
+              <button
+                aria-label={`Открыть чат ${chat.displayTitle ?? chat.title ?? 'Чат'}`}
+                data-chat-index={chats.indexOf(chat)}
+                className="min-w-0 flex-1 rounded-xl px-2 py-1.5 text-left"
+                onClick={() => onSelect(chat.id)}
+                type="button"
+              >
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <p
+                    className={`truncate text-sm font-semibold ${active ? 'text-[var(--text)]' : 'text-[var(--text-soft)]'}`}
+                  >
+                    {chat.displayTitle ?? chat.title ?? 'Чат'}
+                  </p>
+                  <div className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                    {onlineCount > 0 && <span>{onlineCount} online</span>}
+                    {lastTime && <span>{lastTime}</span>}
+                    {unread > 0 && (
+                      <span className="rounded-full bg-[var(--accent)] px-2 py-0.5 text-[var(--accent-contrast)]">
+                        {unread}
+                      </span>
+                    )}
+                  </div>
                 </div>
+                <p className="truncate text-xs text-[var(--muted)]">
+                  {chat.lastMessage?.text || chat.lastMessage?.attachments?.[0]?.originalName || members || 'Пусто'}
+                </p>
+              </button>
+
+              <div className="opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100">
+                <ChatActionsMenu
+                  buttonClassName="h-8 w-8 rounded-xl border-0 bg-transparent shadow-none"
+                  items={actionItems}
+                />
               </div>
-              <p className="truncate text-xs text-[var(--muted)]">
-                {chat.lastMessage?.text ?? (members || 'Пусто')}
-              </p>
-            </button>
+            </div>
           );
         })}
       </div>
 
-      <div className="mt-3 rounded-2xl border border-[var(--border)] bg-[var(--panel-2)] p-3">
-        <p className="text-sm text-[var(--muted)]">Профиль</p>
+      <div className="brand-surface mt-3 shrink-0 p-3">
+        <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Profile</p>
+        <Link className="brand-link block py-2 text-xs" to="/audio/noise-lab">Диагностика микрофона</Link>
         <button
-          className="mt-2 w-full rounded-xl border border-[var(--border)] bg-[var(--bg)] px-3 py-2 text-left text-sm transition-colors duration-150 hover:bg-[var(--panel)]"
+          aria-label={`Открыть профиль @${currentUser.username ?? currentUser.name}`}
+          className="brand-surface-muted mt-2 w-full px-3 py-3 text-left transition-colors duration-150 hover:border-[var(--border-strong)]"
           onClick={onOpenProfile}
           type="button"
         >
-          @{currentUser.username ?? currentUser.name}
+          <span className="block text-sm font-semibold text-[var(--text)]">
+            @{currentUser.username ?? currentUser.name}
+          </span>
+          <span className="mt-1 block text-xs text-[var(--muted)]">
+            Настройки идентичности и никнейма
+          </span>
         </button>
       </div>
     </aside>
@@ -615,23 +1368,24 @@ function GroupMemberManager({
   onClose,
   onAdded,
   onRename,
-  onLeave,
 }: {
   chat: Chat;
   onClose: () => void;
   onAdded: () => void;
-  onRename: (title: string) => void;
-  onLeave: () => void;
+  onRename: (title: string) => Promise<void>;
 }) {
   const existingUserIds = new Set(chat.members.map((member) => member.user.id));
   const [search, setSearch] = useState('');
   const [title, setTitle] = useState(chat.title ?? '');
+  const [renamePending, setRenamePending] = useState(false);
   const normalizedSearch = normalizeUserSearch(search);
+
   const userSearch = useQuery({
     queryKey: ['group-users', chat.id, normalizedSearch],
     queryFn: () => api.searchUsers(normalizedSearch),
     enabled: normalizedSearch.length >= 3,
   });
+
   const addMemberMutation = useMutation({
     mutationFn: (username: string) => api.addChatMember(chat.id, username),
     onSuccess: () => {
@@ -640,87 +1394,468 @@ function GroupMemberManager({
     },
   });
 
-  const availableUsers = (userSearch.data?.users ?? []).filter((user) => !existingUserIds.has(user.id));
+  const availableUsers = (userSearch.data?.users ?? []).filter(
+    (user) => !existingUserIds.has(user.id),
+  );
 
   useEffect(() => {
     setTitle(chat.title ?? '');
   }, [chat.title]);
 
+  async function submitRename() {
+    const nextTitle = title.trim();
+    if (!nextTitle) return;
+
+    try {
+      setRenamePending(true);
+      await onRename(nextTitle);
+    } finally {
+      setRenamePending(false);
+    }
+  }
+
   return (
-    <div className="rounded-2xl border border-[var(--border)] bg-[var(--panel)] p-3">
-      <div className="mb-3 grid gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-sm text-[var(--text)]">Комната</p>
-          <button className="text-xs text-[var(--danger)] hover:brightness-110" onClick={onLeave} type="button">
-            Выйти
-          </button>
+    <div className="brand-card rounded-3xl p-4">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-base font-semibold text-[var(--text)]">Настройки комнаты</p>
+          <p className="text-sm text-[var(--muted)]">
+            Переименование и приглашения без перезагрузки.
+          </p>
         </div>
-        <div className="flex gap-2">
+        <button className={brandGhostButtonClassName} onClick={onClose} type="button">
+          Закрыть
+        </button>
+      </div>
+
+      <div className="brand-surface mb-4 grid gap-3 p-3">
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm text-[var(--text)]">Название комнаты</p>
+          <span className="text-xs text-[var(--muted)]">{chat.members.length} участников</span>
+        </div>
+
+        <div className="flex flex-col gap-2 md:flex-row">
           <input
-            className="h-9 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className={`${brandInputCompactClassName} min-w-0 flex-1`}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Переименовать комнату"
             value={title}
           />
           <button
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm transition-colors duration-150 hover:bg-[var(--panel)]"
-            onClick={() => onRename(title.trim())}
+            className={brandSecondaryButtonCompactClassName}
+            disabled={renamePending}
+            onClick={() => void submitRename()}
             type="button"
           >
-            Сохранить
+            {renamePending ? 'Сохраняю...' : 'Сохранить'}
           </button>
         </div>
       </div>
 
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-sm text-[var(--text)]">Добавить людей</p>
-        <p className="text-xs text-[var(--muted)]">Поиск и приглашение сразу</p>
-      </div>
-      <input
-        className="h-9 w-full rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 text-sm outline-none focus:ring-2 focus:ring-[var(--accent)]"
-        onChange={(event) => setSearch(event.target.value)}
-        placeholder="Поиск @username"
-        value={search}
-      />
-      {normalizedSearch.length >= 3 && (
-        <div className="mt-2 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] p-2">
-          <UserSearchResults
-            actionLabel="Добавить"
-            disabledUsername={null}
-            emptyLabel="Некого добавить"
-            isPending={userSearch.isPending}
-            onAction={(username) => addMemberMutation.mutate(username)}
-            users={availableUsers}
-          />
-          {addMemberMutation.error && (
-            <p className="p-2 text-xs text-[var(--danger)]">{errorMessage(addMemberMutation.error)}</p>
-          )}
+      <div className="brand-surface mb-4 p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-sm text-[var(--text)]">Сейчас в комнате</p>
+          <p className="text-xs text-[var(--muted)]">Участники</p>
         </div>
-      )}
+
+        <div className="flex flex-wrap gap-2">
+          {chat.members.map((member) => (
+            <span className="brand-pill text-xs text-[var(--text)]" key={member.id}>
+              @{member.user.username ?? member.user.name}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      <div className="brand-surface p-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="text-sm text-[var(--text)]">Пригласить людей</p>
+          <p className="text-xs text-[var(--muted)]">Поиск и добавление сразу</p>
+        </div>
+
+        <input
+          className={brandInputCompactClassName}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Поиск @username"
+          value={search}
+        />
+
+        {normalizedSearch.length >= 3 && (
+          <div className="brand-surface-muted mt-2 p-2">
+            <UserSearchResults
+              actionLabel="Добавить"
+              disabledUsername={null}
+              emptyLabel="Некого добавить"
+              isPending={userSearch.isPending}
+              onAction={(username) => addMemberMutation.mutate(username)}
+              users={availableUsers}
+            />
+
+            {addMemberMutation.error && (
+              <p className="p-2 text-xs text-[var(--danger)]">
+                {errorMessage(addMemberMutation.error)}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+void GroupMemberManager;
+
+function GroupSettingsModal({
+  chat,
+  open,
+  onClose,
+}: {
+  chat: Chat;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const existingUserIds = new Set(chat.members.map((member) => member.user.id));
+  const [search, setSearch] = useState('');
+  const [title, setTitle] = useState(chat.title ?? '');
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameSuccess, setRenameSuccess] = useState<string | null>(null);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteSuccess, setInviteSuccess] = useState<string | null>(null);
+  const linkMutation = useMutation({
+    mutationFn: () => api.createInvite(chat.id),
+    onSuccess: async ({ token }) => {
+      const url = `${window.location.origin}/invite/${token}`;
+      await navigator.clipboard?.writeText(url);
+      setInviteSuccess('Ссылка создана и скопирована.');
+    },
+    onError: (caught) => setInviteError(errorMessage(caught)),
+  });
+  const normalizedSearch = normalizeUserSearch(search);
+  const normalizedTitle = title.trim();
+
+  const userSearch = useQuery({
+    queryKey: ['group-users', chat.id, normalizedSearch],
+    queryFn: () => api.searchUsers(normalizedSearch),
+    enabled: open && normalizedSearch.length >= 3,
+  });
+
+  const renameMutation = useMutation({
+    mutationFn: (nextTitle: string) => api.renameChat(chat.id, nextTitle),
+    onSuccess: ({ chat: updated }) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, updated) : { chats: [updated] },
+      );
+      setRenameError(null);
+      setRenameSuccess('Название комнаты сохранено.');
+    },
+    onError: (caught) => {
+      setRenameSuccess(null);
+      setRenameError(errorMessage(caught));
+    },
+  });
+
+  const addMemberMutation = useMutation({
+    mutationFn: (username: string) => api.addChatMember(chat.id, username),
+    onSuccess: ({ chat: updated }, username) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, updated) : { chats: [updated] },
+      );
+      queryClient.invalidateQueries({ queryKey: ['voicePresence', chat.id] });
+      setSearch('');
+      setInviteError(null);
+      setInviteSuccess(`@${username} добавлен в комнату.`);
+    },
+    onError: (caught) => {
+      setInviteSuccess(null);
+      setInviteError(errorMessage(caught));
+    },
+  });
+
+  const availableUsers = (userSearch.data?.users ?? []).filter(
+    (user) => !existingUserIds.has(user.id),
+  );
+
+  useEffect(() => {
+    if (!open) return;
+
+    setTitle(chat.title ?? '');
+    setSearch('');
+    setRenameError(null);
+    setRenameSuccess(null);
+    setInviteError(null);
+    setInviteSuccess(null);
+  }, [chat.id, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    setTitle(chat.title ?? '');
+  }, [chat.title, open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [onClose, open]);
+
+  function handleTitleChange(value: string) {
+    setTitle(value);
+    setRenameError(null);
+    setRenameSuccess(null);
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    setInviteError(null);
+    setInviteSuccess(null);
+  }
+
+  async function submitRename(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const nextError = groupTitleError(title);
+    if (nextError) {
+      setRenameSuccess(null);
+      setRenameError(nextError);
+      return;
+    }
+
+    if (normalizedTitle === (chat.title ?? '').trim()) {
+      setRenameSuccess(null);
+      setRenameError(null);
+      return;
+    }
+
+    await renameMutation.mutateAsync(normalizedTitle);
+  }
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <button
+        aria-label="Закрыть настройки комнаты"
+        className="brand-overlay absolute inset-0"
+        onClick={onClose}
+        type="button"
+      />
+
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <section
+          aria-modal="true"
+          className="brand-modal relative flex w-[min(90vw,520px)] min-w-0 flex-col overflow-hidden sm:min-w-[420px]"
+          style={{ maxHeight: '85vh' }}
+          role="dialog"
+        >
+          <div className="flex items-start justify-between gap-3 border-b brand-divider px-5 py-4">
+            <div className="min-w-0">
+              <p className="brand-eyebrow text-[11px] text-[var(--muted)]">Room settings</p>
+              <h2 className="brand-display mt-2 truncate text-lg font-semibold text-[var(--text)]">
+                {chat.title ?? chat.displayTitle ?? 'Комната'}
+              </h2>
+              <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
+                Переименование и приглашение участников без перезагрузки.
+              </p>
+            </div>
+            <button
+              className={brandSecondaryButtonCompactClassName}
+              onClick={onClose}
+              type="button"
+            >
+              Закрыть
+            </button>
+          </div>
+
+          <div className="app-scrollbar min-h-0 overflow-y-auto px-5 py-4">
+            <div className="grid gap-4">
+              <form
+                className="brand-surface grid gap-3 p-4"
+                onSubmit={(event) => void submitRename(event)}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">Название комнаты</p>
+                    <p className="text-xs text-[var(--muted)]">
+                      {chat.members.length} участник(ов)
+                    </p>
+                  </div>
+                  <span className="text-xs text-[var(--muted)]">{normalizedTitle.length}/100</span>
+                </div>
+
+                <input
+                  className={brandInputCompactClassName}
+                  maxLength={100}
+                  onChange={(event) => handleTitleChange(event.target.value)}
+                  placeholder="Переименовать комнату"
+                  value={title}
+                />
+
+                {(renameError || renameSuccess) && (
+                  <p
+                    className={
+                      renameError ? brandDangerNoticeClassName : brandSuccessNoticeClassName
+                    }
+                  >
+                    {renameError ?? renameSuccess}
+                  </p>
+                )}
+
+                <button
+                  className={brandPrimaryButtonCompactClassName}
+                  disabled={
+                    renameMutation.isPending ||
+                    Boolean(groupTitleError(title)) ||
+                    normalizedTitle === (chat.title ?? '').trim()
+                  }
+                  type="submit"
+                >
+                  {renameMutation.isPending ? 'Сохраняю...' : 'Сохранить'}
+                </button>
+              </form>
+
+              <section className="brand-surface grid gap-3 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-[var(--text)]">Участники</p>
+                    <p className="text-xs text-[var(--muted)]">Текущий состав комнаты</p>
+                  </div>
+                  <span className="text-xs text-[var(--muted)]">{chat.members.length}</span>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {chat.members.map((member) => (
+                    <span className="brand-pill text-xs text-[var(--text)]" key={member.id}>
+                      @{member.user.username ?? member.user.name}
+                    </span>
+                  ))}
+                </div>
+              </section>
+
+              <section className="brand-surface grid gap-3 p-4">
+                <div>
+                  <p className="text-sm font-medium text-[var(--text)]">Пригласить по ссылке</p>
+                  <p className="text-xs text-[var(--muted)]">
+                    Ссылка добавит пользователя в эту комнату.
+                  </p>
+                </div>
+                <button
+                  className={brandPrimaryButtonCompactClassName}
+                  disabled={linkMutation.isPending}
+                  onClick={() => linkMutation.mutate()}
+                  type="button"
+                >
+                  {linkMutation.isPending ? 'Создаю...' : 'Создать и скопировать ссылку'}
+                </button>
+              </section>
+
+              <section className="brand-surface grid gap-3 p-4">
+                <div>
+                  <p className="text-sm font-medium text-[var(--text)]">Пригласить по @username</p>
+                  <p className="text-xs text-[var(--muted)]">
+                    Найдём пользователя и сразу добавим в комнату.
+                  </p>
+                </div>
+
+                <input
+                  className={brandInputCompactClassName}
+                  disabled={addMemberMutation.isPending}
+                  onChange={(event) => handleSearchChange(event.target.value)}
+                  placeholder="Поиск @username"
+                  spellCheck={false}
+                  value={search}
+                />
+
+                {inviteSuccess && <p className={brandSuccessNoticeClassName}>{inviteSuccess}</p>}
+
+                {normalizedSearch.length > 0 && normalizedSearch.length < 3 && (
+                  <p className="text-sm text-[var(--muted)]">Введи минимум 3 символа.</p>
+                )}
+
+                {normalizedSearch.length >= 3 && (
+                  <div className="brand-surface-muted p-2">
+                    <UserSearchResults
+                      actionLabel={addMemberMutation.isPending ? 'Добавляю...' : 'Добавить'}
+                      disabledUsername={null}
+                      emptyLabel={
+                        userSearch.data?.users?.length
+                          ? 'Все найденные пользователи уже в комнате'
+                          : 'Никого не нашли'
+                      }
+                      isPending={userSearch.isPending}
+                      onAction={(username) => addMemberMutation.mutate(username)}
+                      users={availableUsers}
+                    />
+
+                    {inviteError && (
+                      <p className="p-2 text-xs text-[var(--danger)]">{inviteError}</p>
+                    )}
+                  </div>
+                )}
+              </section>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }
 
 function ChatView({
   chat,
+  isGuest = false,
   currentUserId,
+  onConsumeRoomPanelRequest,
   socket,
+  roomPanelRequestChatId,
+  roomPanelRequestVersion,
   onBack,
   onOpenSidebar,
-  onChatChanged,
+  voicePanel,
 }: {
   chat: Chat;
+  isGuest?: boolean;
   currentUserId: string;
+  onConsumeRoomPanelRequest: () => void;
   socket: ChatSocket | null;
+  roomPanelRequestChatId: string | null;
+  roomPanelRequestVersion: number;
   onBack: () => void;
   onOpenSidebar: () => void;
-  onChatChanged: () => void;
+  voicePanel: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const [text, setText] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadRef = useRef<AbortController | null>(null);
+  useEffect(() => () => uploadRef.current?.abort(), []);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
   const [roomPanelOpen, setRoomPanelOpen] = useState(false);
+  const messagesScrollerRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+  const pendingHistoryRestoreRef = useRef<{
+    pageCount: number;
+    scrollHeight: number;
+    scrollTop: number;
+  } | null>(null);
+  const allowDelete = canDeleteChat(chat, currentUserId);
+
   const messagesQuery = useInfiniteQuery({
     queryKey: ['messages', chat.id],
     initialPageParam: null as string | null,
@@ -728,11 +1863,61 @@ function ChatView({
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
   });
 
+  const deleteChatMutation = useMutation({
+    mutationFn: () => api.deleteChat(chat.id),
+    onSuccess: () => {
+      clearChatClientState(queryClient, chat.id);
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      onBack();
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
+    },
+  });
+
+  const leaveChatMutation = useMutation({
+    mutationFn: () => api.leaveGroupChat(chat.id),
+    onSuccess: () => {
+      clearChatClientState(queryClient, chat.id);
+      setActionError(null);
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      onBack();
+    },
+    onError: (caught) => {
+      setActionError(errorMessage(caught));
+    },
+  });
+
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = text.trim();
-    if (!value) return;
+    if (uploading || (!value && !file)) return;
     setError(null);
+
+    if (file) {
+      const controller = new AbortController();
+      uploadRef.current = controller;
+      setUploading(true);
+      try {
+        const { message } = await api.uploadAttachment(chat.id, file, value, controller.signal);
+        queryClient.setQueryData<MessagesInfinite>(['messages', chat.id], (old) =>
+          appendMessageToPages(old, message),
+        );
+        queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+          patchChatsWithMessage(old, message, currentUserId, chat.id),
+        );
+        setText('');
+        setFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      } catch (caught) {
+        if (!controller.signal.aborted) setError(errorMessage(caught));
+      } finally {
+        setUploading(false);
+        uploadRef.current = null;
+      }
+      return;
+    }
 
     if (socket?.connected) {
       socket.emit('message:send', { chatId: chat.id, text: value }, (response) => {
@@ -740,6 +1925,7 @@ function ChatView({
           setError(response.error);
           return;
         }
+
         setText('');
       });
       return;
@@ -801,145 +1987,314 @@ function ChatView({
 
   useEffect(() => {
     setRoomPanelOpen(false);
+    setActionError(null);
   }, [chat.id]);
+
+  useEffect(() => {
+    stickToBottomRef.current = true;
+    pendingHistoryRestoreRef.current = null;
+  }, [chat.id]);
+
+  useEffect(() => {
+    if (roomPanelRequestChatId !== chat.id) return;
+    setRoomPanelOpen(true);
+    onConsumeRoomPanelRequest();
+  }, [chat.id, onConsumeRoomPanelRequest, roomPanelRequestChatId, roomPanelRequestVersion]);
 
   const messages =
     messagesQuery.data?.pages
       .slice()
       .reverse()
       .flatMap((page) => page.messages) ?? [];
-  const nextCursor = messagesQuery.data?.pages[messagesQuery.data.pages.length - 1]?.nextCursor ?? null;
+  const pageCount = messagesQuery.data?.pages.length ?? 0;
+  const nextCursor =
+    messagesQuery.data?.pages[messagesQuery.data.pages.length - 1]?.nextCursor ?? null;
+  const latestMessageId = messages[messages.length - 1]?.id ?? null;
   const typingUsers = chat.members
     .map((member) => member.user)
     .filter((user) => typingUserIds.includes(user.id) && user.id !== currentUserId)
     .map((user) => `@${user.username ?? user.name}`);
 
-  return (
-    <section className="flex min-h-screen flex-col bg-[var(--bg)]">
-      <header className="flex min-h-[72px] shrink-0 items-center justify-between border-b border-[var(--border)] px-4 md:px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <button
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
-            onClick={onOpenSidebar}
-            type="button"
-          >
-            Чаты
-          </button>
-          <div>
-            <p className="truncate font-medium">{chat.displayTitle ?? chat.title ?? 'Чат'}</p>
-            <p className="text-xs text-[var(--muted)]">{chat.members.length} участник(ов)</p>
-          </div>
-        </div>
+  useEffect(() => {
+    const pendingRestore = pendingHistoryRestoreRef.current;
+    const scroller = messagesScrollerRef.current;
 
-        <div className="flex items-center gap-2">
-          {chat.type === 'group' && (
-            <button
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] transition-colors duration-150 hover:bg-[var(--panel-2)]"
-              onClick={() => setRoomPanelOpen((value) => !value)}
-              type="button"
+    if (!pendingRestore || !scroller || messagesQuery.isFetchingNextPage) return;
+
+    if (pageCount > pendingRestore.pageCount) {
+      scroller.scrollTop =
+        pendingRestore.scrollTop + (scroller.scrollHeight - pendingRestore.scrollHeight);
+    }
+
+    pendingHistoryRestoreRef.current = null;
+  }, [messagesQuery.isFetchingNextPage, pageCount]);
+
+  useEffect(() => {
+    const scroller = messagesScrollerRef.current;
+    if (!scroller || pendingHistoryRestoreRef.current || !stickToBottomRef.current) return;
+    scroller.scrollTop = scroller.scrollHeight;
+  }, [chat.id, latestMessageId]);
+
+  useEffect(() => {
+    const scroller = messagesScrollerRef.current;
+    if (!scroller || typeof ResizeObserver === 'undefined') return;
+
+    const observer = new ResizeObserver(() => {
+      if (!stickToBottomRef.current || pendingHistoryRestoreRef.current) return;
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+
+    observer.observe(scroller);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  const actionPending = leaveChatMutation.isPending || deleteChatMutation.isPending;
+  const chatActions =
+    chat.type === 'group'
+      ? buildGroupChatActionItems({
+          allowDelete,
+          disabled: actionPending,
+          onDelete: () => {
+            setActionError(null);
+            deleteChatMutation.mutate();
+          },
+          onLeave: () => {
+            setActionError(null);
+            leaveChatMutation.mutate();
+          },
+          onManage: () => {
+            setActionError(null);
+            setRoomPanelOpen(true);
+          },
+        })
+      : [unavailableDirectChatAction()];
+
+  async function loadOlderMessages() {
+    const scroller = messagesScrollerRef.current;
+
+    if (scroller) {
+      pendingHistoryRestoreRef.current = {
+        pageCount,
+        scrollHeight: scroller.scrollHeight,
+        scrollTop: scroller.scrollTop,
+      };
+      stickToBottomRef.current = false;
+    }
+
+    try {
+      await messagesQuery.fetchNextPage();
+    } catch (caught) {
+      pendingHistoryRestoreRef.current = null;
+      throw caught;
+    }
+  }
+
+  function handleMessagesScroll() {
+    const scroller = messagesScrollerRef.current;
+    if (!scroller) return;
+
+    const distanceFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    stickToBottomRef.current = distanceFromBottom <= 48;
+  }
+
+  return (
+    <section className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,0.98),rgba(5,5,7,0.98))]">
+      <header className="flex min-h-[78px] shrink-0 items-center justify-between border-b brand-divider px-4 md:px-5">
+        <button
+          className="min-w-0 flex-1 rounded-[1.35rem] border border-[var(--border-strong)] bg-white/[0.03] px-3 py-2 text-left outline-none transition-colors duration-150 hover:border-[var(--halo-strong)] hover:bg-white/[0.05] focus-visible:border-[var(--halo-strong)] focus-visible:bg-white/[0.05] md:rounded-2xl md:border-0 md:bg-transparent md:px-0 md:py-0 md:hover:bg-transparent md:focus-visible:bg-transparent md:cursor-default"
+          onClick={onOpenSidebar}
+          type="button"
+        >
+          <span className="mb-1 inline-flex items-center gap-1 text-[10px] uppercase tracking-[0.16em] text-[var(--muted)] md:hidden">
+            К списку чатов
+            <svg
+              aria-hidden="true"
+              className="h-3.5 w-3.5"
+              fill="none"
+              viewBox="0 0 16 16"
+              xmlns="http://www.w3.org/2000/svg"
             >
-              {roomPanelOpen ? 'Скрыть комнату' : 'Пригласить / имя'}
-            </button>
-          )}
-          <button
-            className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-sm text-[var(--text)] md:hidden"
-            onClick={onBack}
-            type="button"
-          >
-            Назад
-          </button>
+              <path
+                d="M6 3.75 10.25 8 6 12.25"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+              />
+            </svg>
+          </span>
+          <p className="brand-display truncate text-lg font-semibold text-[var(--text)]">
+            {chat.displayTitle ?? chat.title ?? 'Чат'}
+          </p>
+          <p className="text-xs text-[var(--muted)]">{chat.members.length} участник(ов)</p>
+        </button>
+
+        <div className="ml-4 flex shrink-0 items-center">
+          {!isGuest && <ChatActionsMenu items={chatActions} />}
         </div>
       </header>
 
-      <Suspense
-        fallback={
-          <div className="border-b border-[var(--border)] px-4 py-3 text-sm text-[var(--muted)]">
-            Голос...
-          </div>
-        }
-      >
-        <VoicePanel chat={chat} socket={socket} />
-      </Suspense>
-
-      {chat.type === 'group' && roomPanelOpen && (
-        <div className="border-b border-[var(--border)] px-4 py-3">
-          <GroupMemberManager
-            chat={chat}
-            onClose={() => setRoomPanelOpen(false)}
-            onAdded={onChatChanged}
-            onLeave={async () => {
-              await api.leaveGroupChat(chat.id);
-              queryClient.invalidateQueries({ queryKey: ['chats'] });
-              onBack();
-            }}
-            onRename={async (title) => {
-              if (!title) return;
-              await api.renameChat(chat.id, title);
-              queryClient.invalidateQueries({ queryKey: ['chats'] });
-            }}
-          />
+      {actionError && (
+        <div className="border-b brand-divider px-4 py-3 md:px-5">
+          <p className={brandDangerNoticeClassName}>{actionError}</p>
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto px-4 py-4 md:px-6">
-        {messagesQuery.isPending && <p className="text-sm text-[var(--muted)]">Гружу сообщения...</p>}
-        {messages.length === 0 && !messagesQuery.isPending && (
-          <p className="text-center text-sm text-[var(--muted)]">Пока пусто. Напиши первым.</p>
-        )}
-        {nextCursor && (
-          <div className="mb-3 flex justify-center">
-            <button
-              className="h-9 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-3 text-xs text-[var(--text)]"
-              onClick={() => messagesQuery.fetchNextPage()}
-              type="button"
-            >
-              Показать старые
-            </button>
-          </div>
-        )}
-        <div className="divide-y divide-[var(--border)] overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--panel)]">
-          {messages.map((message) => {
-            const own = message.userId === currentUserId;
+      <div className="min-w-0 shrink-0">
+        <Suspense
+          fallback={
+            <div className="border-b brand-divider px-4 py-3 text-sm text-[var(--muted)]">
+              Голос...
+            </div>
+          }
+        >
+          {voicePanel}
+        </Suspense>
+      </div>
 
-            return (
-              <div className="px-4 py-3" key={message.id}>
-                <div className="mb-1 flex items-center justify-between gap-3">
-                  <div className="min-w-0">
-                    <span className={`text-sm font-medium ${own ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}>
-                      {own ? 'Ты' : `@${message.user.username}`}
+      <div className="flex min-h-0 flex-1 min-w-0 flex-col overflow-hidden px-4 py-4 md:px-6">
+        <div
+          className="app-scrollbar min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+          onScroll={handleMessagesScroll}
+          ref={messagesScrollerRef}
+        >
+          {messagesQuery.isPending && (
+            <p className="text-sm text-[var(--muted)]">Гружу сообщения...</p>
+          )}
+
+          {messages.length === 0 && !messagesQuery.isPending && (
+            <div className="brand-surface grid place-items-center px-5 py-10 text-center">
+              <GoidaLogo
+                className="mb-4 block w-20"
+                imageClassName="h-auto w-full object-contain opacity-90"
+                variant="mark"
+              />
+              <p className="brand-display text-lg text-[var(--text)]">Пока пусто</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-[var(--muted)]">
+                Напиши первое сообщение и начни разговор.
+              </p>
+            </div>
+          )}
+
+          {nextCursor && (
+            <div className="mb-3 flex justify-center">
+              <button
+                className={`${brandSecondaryButtonCompactClassName} text-xs`}
+                onClick={() => void loadOlderMessages()}
+                type="button"
+              >
+                Показать старые
+              </button>
+            </div>
+          )}
+
+          <div className="brand-card min-w-0 divide-y divide-[var(--border)] overflow-hidden">
+            {messages.map((message) => {
+              const own = message.userId === currentUserId;
+
+              return (
+                <div className="px-4 py-3" key={message.id}>
+                  <div className="mb-1 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <span
+                        className={`text-sm font-medium ${own ? 'text-[var(--accent)]' : 'text-[var(--text)]'}`}
+                      >
+                        {own ? 'Ты' : `@${message.user.username ?? message.user.name}`}
+                      </span>
+                    </div>
+                    <span className="shrink-0 text-xs text-[var(--muted)]">
+                      {formatChatTime(message.createdAt)}
                     </span>
                   </div>
-                  <span className="shrink-0 text-xs text-[var(--muted)]">
-                    {formatChatTime(message.createdAt)}
-                  </span>
+                  <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-[var(--text)]">
+                    {message.text}
+                  </p>
+                  {message.attachments?.map((attachment) => (
+                    <AttachmentCard key={attachment.id} attachment={attachment} chatId={chat.id} />
+                  ))}
                 </div>
-                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-[var(--text)]">
-                  {message.text}
-                </p>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
-      <footer className="shrink-0 border-t border-[var(--border)] bg-[var(--panel)] p-3">
+      <footer className="shrink-0 border-t brand-divider bg-[rgba(11,12,15,0.92)] px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+          <input
+            type="file"
+            accept={ATTACHMENT_ACCEPT}
+            className="hidden"
+            ref={fileInputRef}
+            onChange={(event) => {
+              const selected = event.target.files?.[0];
+              if (!selected) return;
+              if (!selected.size || selected.size > MAX_ATTACHMENT_BYTES) {
+                setError('Выбери непустой файл размером до 100 МБ');
+                event.target.value = '';
+                return;
+              }
+              setError(null);
+              setFile(selected);
+            }}
+          />
+          <button
+            className={brandSecondaryButtonCompactClassName}
+            disabled={uploading}
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Прикрепить файл
+          </button>
+          {file ? (
+            <>
+              <span className="max-w-xs truncate">{file.name} · {formatFileSize(file.size)}</span>
+              <button type="button" disabled={uploading} onClick={() => {
+                setFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}>Убрать</button>
+            </>
+          ) : <span>До 100 МБ · хранение 14 дней</span>}
+          {uploading && (
+            <>
+              <span role="status">Загрузка…</span>
+              <button type="button" onClick={() => uploadRef.current?.abort()}>Отмена</button>
+            </>
+          )}
+        </div>
         {error && <p className="mb-2 text-sm text-[var(--danger)]">{error}</p>}
         {typingUsers.length > 0 && (
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
         )}
-        <form className="flex gap-2" onSubmit={send}>
+
+        <form className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2" onSubmit={send}>
           <input
-            className="h-10 min-w-0 flex-1 rounded-xl border border-[var(--border)] bg-[var(--panel-2)] px-3 outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className={`${brandInputCompactClassName} min-w-0`}
             maxLength={4000}
             onChange={(event) => setText(event.target.value)}
             placeholder="Написать сообщение..."
+            disabled={uploading}
             value={text}
           />
-          <button className="h-10 rounded-xl bg-[var(--accent)] px-4 font-medium text-white transition-colors duration-150 hover:bg-[var(--accent-hover)]">
+          <button
+            className={`${brandPrimaryButtonCompactClassName} min-w-[100px] shrink-0 whitespace-nowrap px-4`}
+            disabled={uploading}
+          >
             Отправить
           </button>
         </form>
       </footer>
+
+      {!isGuest && chat.type === 'group' && (
+        <GroupSettingsModal
+          chat={chat}
+          onClose={() => setRoomPanelOpen(false)}
+          open={roomPanelOpen}
+        />
+      )}
     </section>
   );
 }
@@ -947,21 +2302,84 @@ function ChatView({
 function ChatLayout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data } = authClient.useSession();
+  const { data } = usePrincipalSession();
   const baseUser = data?.user as CurrentUser | undefined;
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('chat'));
   const [socket, setSocket] = useState<ChatSocket | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [roomPanelRequestChatId, setRoomPanelRequestChatId] = useState<string | null>(null);
+  const [roomPanelRequestVersion, setRoomPanelRequestVersion] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    readStoredBoolean(SIDEBAR_RAIL_STORAGE_KEY, false),
+  );
   const [socketGeneration, setSocketGeneration] = useState(0);
   const [localUsername, setLocalUsername] = useState<string | null>(baseUser?.username ?? null);
   const selectedChatIdRef = useRef<string | null>(null);
   const currentUserIdRef = useRef<string | null>(baseUser?.id ?? null);
   const chatsQuery = useQuery({ queryKey: ['chats'], queryFn: api.listChats });
   const chats = chatsQuery.data?.chats ?? [];
+
+  useEffect(() => {
+    writeStoredBoolean(SIDEBAR_RAIL_STORAGE_KEY, sidebarCollapsed);
+  }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (data?.kind !== 'guest') return;
+    const timer = setTimeout(() => {
+      queryClient.clear();
+      navigate(`/invite/${encodeURIComponent(data.inviteToken ?? '')}`, { replace: true });
+    }, Math.max(0, new Date(data.session.expiresAt).getTime() - Date.now()));
+    return () => clearTimeout(timer);
+  }, [data?.kind, data?.session.expiresAt, data?.inviteToken, queryClient, navigate]);
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
     [chats, selectedChatId],
+  );
+  const [activeVoiceChatId, setActiveVoiceChatId] = useState<string | null>(null);
+  const [voiceSession, setVoiceSession] = useState<VoiceToken | null>(null);
+  const [voiceConnectEnabled, setVoiceConnectEnabled] = useState(false);
+  const [voiceJoinPendingChatId, setVoiceJoinPendingChatId] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [voiceDeafened, setVoiceDeafened] = useState(false);
+  const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
+  const [voiceCapturePreferences, setVoiceCapturePreferences] = useState<
+    Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>
+  >(() => {
+    const prefs = readVoiceCapturePreferences();
+    return {
+      autoGainControl: prefs.autoGainControl,
+      echoCancellation: prefs.echoCancellation,
+    };
+  });
+  const [noiseSuppressionMode, setNoiseSuppressionMode] = useState<NoiseSuppressionMode>(
+    () => readVoiceCapturePreferences().noiseSuppressionMode,
+  );
+  const [noiseSuppressionState, setNoiseSuppressionState] = useState<NoiseSuppressionRuntimeState>(
+    () => ({
+      effectiveMode: readVoiceCapturePreferences().noiseSuppressionMode,
+      error: null,
+    }),
+  );
+  const { remoteParticipantVolumes: voiceRemoteParticipantVolumes, setRemoteParticipantVolume } =
+    usePersistentPeerVolumes(baseUser?.id ?? null);
+  const { activeDeviceId, devices, setMicDeviceId } = useAudioDevices();
+  const activeVoiceChatIdRef = useRef<string | null>(null);
+  const voicePresenceChatIdRef = useRef<string | null>(null);
+  const voiceDisconnectActionRef = useRef<VoiceDisconnectAction | null>(null);
+  const pendingVoiceSwitchChatRef = useRef<Chat | null>(null);
+  const activeVoiceChat = useMemo(
+    () => chats.find((chat) => chat.id === activeVoiceChatId) ?? null,
+    [activeVoiceChatId, chats],
+  );
+  const voiceCaptureOptions = useMemo<VoiceCapturePreferences>(
+    () => ({
+      autoGainControl: voiceCapturePreferences.autoGainControl,
+      echoCancellation: voiceCapturePreferences.echoCancellation,
+      micDeviceId: activeDeviceId,
+      noiseSuppressionMode,
+    }),
+    [activeDeviceId, noiseSuppressionMode, voiceCapturePreferences],
   );
 
   useEffect(() => {
@@ -974,6 +2392,35 @@ function ChatLayout() {
   }, [selectedChatId]);
 
   useEffect(() => {
+    activeVoiceChatIdRef.current = activeVoiceChatId;
+  }, [activeVoiceChatId]);
+
+  useEffect(() => {
+    writeVoiceCapturePreferences(
+      {
+        autoGainControl: voiceCapturePreferences.autoGainControl,
+        echoCancellation: voiceCapturePreferences.echoCancellation,
+      },
+      readVoiceCapturePreferences(),
+    );
+  }, [voiceCapturePreferences]);
+
+  useEffect(() => {
+    writeVoiceCapturePreferences({ noiseSuppressionMode }, readVoiceCapturePreferences());
+  }, [noiseSuppressionMode]);
+
+  useEffect(() => {
+    setNoiseSuppressionState({
+      effectiveMode: noiseSuppressionMode,
+      error: null,
+    });
+  }, [noiseSuppressionMode]);
+
+  useEffect(() => {
+    setVoiceSettingsOpen(false);
+  }, [activeVoiceChatId]);
+
+  useEffect(() => {
     if (selectedChatId) setSidebarOpen(false);
     else setSidebarOpen(true);
   }, [selectedChatId]);
@@ -984,10 +2431,30 @@ function ChatLayout() {
       return;
     }
 
-    if (selectedChatId && !chats.some((chat) => chat.id === selectedChatId)) {
+    if (selectedChatId && chatsQuery.isSuccess && !chatsQuery.isFetching && !chats.some((chat) => chat.id === selectedChatId)) {
       setSelectedChatId(chats[0]?.id ?? null);
     }
-  }, [chats, selectedChatId]);
+  }, [chats, selectedChatId, chatsQuery.isSuccess, chatsQuery.isFetching]);
+
+  useEffect(() => {
+    if (!activeVoiceChatId) return;
+    if (chats.some((chat) => chat.id === activeVoiceChatId)) return;
+
+    pendingVoiceSwitchChatRef.current = null;
+    voiceDisconnectActionRef.current = 'removed';
+    setVoiceConnectEnabled(false);
+
+    if (!voiceSession) {
+      if (voicePresenceChatIdRef.current) {
+        socket?.emit('voice:left', { chatId: voicePresenceChatIdRef.current });
+        voicePresenceChatIdRef.current = null;
+      }
+      voiceDisconnectActionRef.current = null;
+      setActiveVoiceChatId(null);
+      setVoiceSession(null);
+      setVoiceJoinPendingChatId(null);
+    }
+  }, [activeVoiceChatId, chats, socket, voiceSession]);
 
   useEffect(() => {
     const nextSocket = createChatSocket();
@@ -1002,16 +2469,56 @@ function ChatLayout() {
       );
     });
 
-    nextSocket.on('chat:updated', (chat) => {
-      queryClient.setQueryData<ChatListData>(['chats'], (old) => upsertChat(old, chat));
+    nextSocket.on('chat:created', (chat) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, chat) : { chats: [chat] },
+      );
+      if (!selectedChatIdRef.current) {
+        setSelectedChatId(chat.id);
+      }
     });
 
-    nextSocket.on('chat:list:invalidate', () => {
+    nextSocket.on('chat:updated', (chat) => {
+      queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+        old ? upsertChat(old, chat) : { chats: [chat] },
+      );
+    });
+
+    nextSocket.on('chat:deleted', ({ chatId }) => {
+      clearChatClientState(queryClient, chatId);
+      setSelectedChatId((current) => (current === chatId ? null : current));
+    });
+
+    nextSocket.on('chat:member-added', ({ chatId }) => {
       queryClient.invalidateQueries({ queryKey: ['chats'] });
+      queryClient.invalidateQueries({ queryKey: ['voicePresence', chatId] });
+    });
+
+    nextSocket.on('chat:member-removed', ({ chatId }) => {
+      queryClient.invalidateQueries({ queryKey: ['chats'] });
+      queryClient.invalidateQueries({ queryKey: ['voicePresence', chatId] });
+    });
+
+    nextSocket.on('voice:presence:update', ({ chatId, users }) => {
+      queryClient.setQueryData(['voicePresence', chatId], { users });
+    });
+
+    nextSocket.on('user:updated', ({ user }) => {
+      if (user.id === currentUserIdRef.current) {
+        setLocalUsername(user.username ?? user.name);
+      }
+      patchUserCaches(queryClient, user, currentUserIdRef.current);
     });
 
     nextSocket.on('message:error', (payload) => {
       console.warn(payload.message);
+    });
+    nextSocket.on('session:expired', () => {
+      void queryClient.invalidateQueries({ queryKey: ['session'] });
+    });
+    nextSocket.on('connect', () => {
+      if (selectedChatIdRef.current) nextSocket.emit('chat:join', { chatId: selectedChatIdRef.current });
+      if (voicePresenceChatIdRef.current) nextSocket.emit('voice:join', { chatId: voicePresenceChatIdRef.current });
     });
 
     return () => {
@@ -1028,17 +2535,140 @@ function ChatLayout() {
     };
   }, [selectedChatId, socket]);
 
+  useEffect(() => {
+    const chatId = voicePresenceChatIdRef.current;
+    if (!socket || !chatId) return;
+
+    socket.emit('voice:join', { chatId });
+  }, [socket]);
+
+  async function startVoiceJoin(chat: Chat) {
+    setVoiceJoinPendingChatId(chat.id);
+    setVoiceError(null);
+
+    try {
+      const token = await api.getVoiceToken(chat.id);
+      setActiveVoiceChatId(chat.id);
+      setVoiceSession(token);
+      setVoiceConnectEnabled(true);
+    } catch (caught) {
+      setVoiceError(errorMessage(caught));
+    } finally {
+      setVoiceJoinPendingChatId(null);
+    }
+  }
+
+  function clearVoicePresence() {
+    const chatId = voicePresenceChatIdRef.current;
+    if (!chatId) return;
+
+    socket?.emit('voice:left', { chatId });
+    voicePresenceChatIdRef.current = null;
+  }
+
+  function finalizeVoiceDisconnect(action: VoiceDisconnectAction | null) {
+    clearVoicePresence();
+    setVoiceConnectEnabled(false);
+    setVoiceSession(null);
+    setActiveVoiceChatId(null);
+    setVoiceJoinPendingChatId(null);
+
+    const nextChat = action === 'switch' ? pendingVoiceSwitchChatRef.current : null;
+    pendingVoiceSwitchChatRef.current = null;
+    voiceDisconnectActionRef.current = null;
+
+    if (!action) {
+      setVoiceError((current) => current ?? 'Звонок завершился из-за ошибки подключения.');
+    }
+
+    if (nextChat) {
+      void startVoiceJoin(nextChat);
+    }
+  }
+
+  function leaveVoiceChat() {
+    if (!voiceSession && !activeVoiceChatId) return;
+
+    pendingVoiceSwitchChatRef.current = null;
+    voiceDisconnectActionRef.current = 'leave';
+    setVoiceConnectEnabled(false);
+
+    if (!voiceSession) {
+      finalizeVoiceDisconnect('leave');
+    }
+  }
+
+  function joinVoiceChat(chat: Chat) {
+    if (voiceJoinPendingChatId) return;
+
+    const currentVoiceChatId = activeVoiceChatIdRef.current;
+    if (currentVoiceChatId === chat.id && (voiceSession || voiceConnectEnabled)) {
+      setVoiceError(null);
+      setSelectedChatId(chat.id);
+      return;
+    }
+
+    if (
+      currentVoiceChatId &&
+      currentVoiceChatId !== chat.id &&
+      (voiceSession || voiceConnectEnabled)
+    ) {
+      const confirmed = window.confirm('Вы уже в другом звонке. Перейти?');
+      if (!confirmed) return;
+
+      setVoiceJoinPendingChatId(chat.id);
+      pendingVoiceSwitchChatRef.current = chat;
+      voiceDisconnectActionRef.current = 'switch';
+      setVoiceConnectEnabled(false);
+
+      if (!voiceSession) {
+        finalizeVoiceDisconnect('switch');
+      }
+      return;
+    }
+
+    void startVoiceJoin(chat);
+  }
+
   async function signOut() {
-    await authClient.signOut();
+    await api.endGuestSession();
+    if (data?.kind !== 'guest') await authClient.signOut();
+    queryClient.clear();
     navigate('/login', { replace: true });
   }
 
-  function handleProfileSaved(username: string) {
-    setLocalUsername(username);
+  function handleProfileSaved(user: PublicUser) {
+    setLocalUsername(user.username ?? user.name);
+    patchUserCaches(queryClient, user, currentUserIdRef.current);
     setProfileOpen(false);
     setSocketGeneration((value) => value + 1);
     queryClient.invalidateQueries({ queryKey: ['chats'] });
     queryClient.invalidateQueries({ queryKey: ['users'] });
+    queryClient.invalidateQueries({ queryKey: ['voicePresence'] });
+  }
+
+  function handleOpenGroupManager(chatId: string) {
+    setSelectedChatId(chatId);
+    setRoomPanelRequestChatId(chatId);
+    setRoomPanelRequestVersion((value) => value + 1);
+  }
+
+  function handleVoiceConnected() {
+    const chatId = activeVoiceChatIdRef.current;
+    if (!chatId) return;
+
+    setVoiceError(null);
+
+    if (voicePresenceChatIdRef.current === chatId) {
+      return;
+    }
+
+    socket?.emit('voice:join', { chatId });
+    voicePresenceChatIdRef.current = chatId;
+  }
+
+  function handleVoiceDisconnected() {
+    finalizeVoiceDisconnect(voiceDisconnectActionRef.current);
   }
 
   if (!baseUser) return <LoadingScreen />;
@@ -1046,67 +2676,170 @@ function ChatLayout() {
   const currentUser: CurrentUser = {
     ...baseUser,
     username: localUsername ?? baseUser.username ?? baseUser.name,
+    isGuest: data?.kind === 'guest',
   };
+  const voicePanel = selectedChat ? (
+    <VoicePanel
+      activeDeviceId={activeDeviceId}
+      activeVoiceChat={activeVoiceChat}
+      capturePreferences={voiceCapturePreferences}
+      chat={selectedChat}
+      deafened={voiceDeafened}
+      devices={devices}
+      error={voiceError}
+      hasActiveVoiceSession={!!voiceSession && !!activeVoiceChatId}
+      isVoiceJoinPending={voiceJoinPendingChatId === selectedChat.id}
+      noiseSuppressionMode={noiseSuppressionMode}
+      noiseSuppressionState={noiseSuppressionState}
+      onCloseSettings={() => setVoiceSettingsOpen(false)}
+      onJoinVoice={joinVoiceChat}
+      onLeaveVoice={leaveVoiceChat}
+      onOpenSettings={() => setVoiceSettingsOpen(true)}
+      onRemoteParticipantVolumeChange={(remoteUserId, nextValue) => {
+        setRemoteParticipantVolume(remoteUserId, nextValue);
+      }}
+      onReturnToVoice={() => {
+        if (activeVoiceChatId) {
+          setSelectedChatId(activeVoiceChatId);
+        }
+      }}
+      onToggleDeafen={() => setVoiceDeafened((value) => !value)}
+      remoteParticipantVolumes={voiceRemoteParticipantVolumes}
+      setCapturePreferences={setVoiceCapturePreferences}
+      setMicDeviceId={setMicDeviceId}
+      setNoiseSuppressionMode={setNoiseSuppressionMode}
+      settingsOpen={voiceSettingsOpen}
+    />
+  ) : null;
+  const rightPaneContent = selectedChat ? (
+    <ChatView
+      key={selectedChat.id}
+      chat={selectedChat}
+      isGuest={data?.kind === 'guest'}
+      currentUserId={currentUser.id}
+      onConsumeRoomPanelRequest={() => setRoomPanelRequestChatId(null)}
+      onBack={() => setSelectedChatId(null)}
+      onOpenSidebar={() => setSidebarOpen(true)}
+      roomPanelRequestChatId={roomPanelRequestChatId}
+      roomPanelRequestVersion={roomPanelRequestVersion}
+      socket={socket}
+      voicePanel={voicePanel}
+    />
+  ) : (
+    <section className="grid h-full min-h-0 place-items-center overflow-hidden px-4 text-center">
+      <div className="brand-card grid max-w-lg gap-4 px-6 py-8">
+        <GoidaLogo
+          className="mx-auto block w-20"
+          imageClassName="h-auto w-full object-contain"
+          variant="mark"
+        />
+        <div>
+          <p className="brand-eyebrow text-[11px] text-[var(--muted)]">Goida workspace</p>
+          <p className="brand-display mt-3 text-2xl font-semibold text-[var(--text)]">
+            {activeVoiceChat ? 'Звонок всё ещё активен' : 'Выбери чат или создай новый'}
+          </p>
+          <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
+            {activeVoiceChat
+              ? `Сессия в ${activeVoiceChat.displayTitle ?? activeVoiceChat.title ?? 'комнате'} ждёт тебя и не прерывается.`
+              : 'Слева уже готов список диалогов, комнат и быстрых действий. Выбери нужный контур и продолжай разговор.'}
+          </p>
+        </div>
+        {activeVoiceChat && (
+          <button
+            className={brandPrimaryButtonClassName}
+            onClick={() => setSelectedChatId(activeVoiceChat.id)}
+            type="button"
+          >
+            К звонку
+          </button>
+        )}
+        <button
+          className={`${brandSecondaryButtonClassName} md:hidden`}
+          onClick={() => setSidebarOpen(true)}
+          type="button"
+        >
+          Открыть список чатов
+        </button>
+      </div>
+    </section>
+  );
+  const rightPane =
+    voiceSession && activeVoiceChatId ? (
+      <LiveKitRoom
+        audio={buildAudioCaptureOptions(voiceCaptureOptions)}
+        className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden"
+        connect={voiceConnectEnabled}
+        connectOptions={{ autoSubscribe: true, maxRetries: 12 }}
+        onConnected={handleVoiceConnected}
+        onDisconnected={handleVoiceDisconnected}
+        onError={(nextError) => setVoiceError(nextError.message)}
+        options={{
+          adaptiveStream: true,
+          audioCaptureDefaults: buildAudioCaptureOptions(voiceCaptureOptions),
+          dynacast: true,
+          stopLocalTrackOnUnpublish: false,
+        }}
+        serverUrl={voiceSession.url}
+        token={voiceSession.token}
+        video={false}
+      >
+        <ConnectedVoiceRuntime
+          activeDeviceId={activeDeviceId}
+          capturePreferences={voiceCapturePreferences}
+          deafened={voiceDeafened}
+          noiseSuppressionMode={noiseSuppressionMode}
+          onNoiseSuppressionStateChange={setNoiseSuppressionState}
+          onError={setVoiceError}
+        />
+        {rightPaneContent}
+      </LiveKitRoom>
+    ) : (
+      rightPaneContent
+    );
 
   return (
     <>
-      <main className="grid min-h-screen grid-cols-1 bg-[var(--bg)] md:grid-cols-[320px_1fr]">
-        <div className="hidden md:block">
+      <main
+        className={`grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] ${sidebarCollapsed && !currentUser.isGuest ? 'md:grid-cols-[84px_1fr]' : 'md:grid-cols-[352px_1fr]'}`}
+      >
+        <div className="hidden min-h-0 overflow-hidden md:block">
           <ChatSidebar
+            collapsed={sidebarCollapsed}
             chats={chats}
             currentUser={currentUser}
+            onOpenGroupManager={handleOpenGroupManager}
             onOpenProfile={() => setProfileOpen(true)}
             onSelect={setSelectedChatId}
             onSignOut={signOut}
-            socket={socket}
             selectedChatId={selectedChatId}
+            socket={socket}
+            onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
           />
         </div>
 
-        <div className="min-w-0">
-          {selectedChat ? (
-            <ChatView
-              chat={selectedChat}
-              currentUserId={currentUser.id}
-              onBack={() => setSelectedChatId(null)}
-              onOpenSidebar={() => setSidebarOpen(true)}
-              onChatChanged={() => queryClient.invalidateQueries({ queryKey: ['chats'] })}
-              socket={socket}
-            />
-          ) : (
-            <section className="grid min-h-screen place-items-center px-4 text-center">
-              <div className="grid gap-3">
-                <p className="text-sm text-[var(--muted)]">Выбери чат или создай новый.</p>
-                <button
-                  className="h-10 rounded-xl border border-[var(--border)] bg-[var(--panel)] px-4 text-sm text-[var(--text)] md:hidden"
-                  onClick={() => setSidebarOpen(true)}
-                  type="button"
-                >
-                  Открыть список чатов
-                </button>
-              </div>
-            </section>
-          )}
-        </div>
+        <div className="min-h-0 min-w-0 overflow-hidden">{rightPane}</div>
       </main>
 
       {sidebarOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
+        <div className="fixed inset-0 z-40 overflow-hidden md:hidden">
           <button
             aria-label="Закрыть список чатов"
-            className="absolute inset-0 bg-black/60"
+            className="brand-overlay absolute inset-0"
             onClick={() => setSidebarOpen(false)}
             type="button"
           />
-          <div className="absolute inset-y-0 left-0 w-[min(88vw,320px)]">
+          <div className="absolute inset-y-0 left-0 h-full w-[min(88vw,352px)] overflow-hidden">
             <ChatSidebar
+              collapsed={false}
               chats={chats}
               currentUser={currentUser}
+              onOpenGroupManager={handleOpenGroupManager}
               onOpenProfile={() => setProfileOpen(true)}
               onSelect={setSelectedChatId}
               onSignOut={signOut}
-              socket={socket}
               selectedChatId={selectedChatId}
+              socket={socket}
+              onToggleCollapsed={() => undefined}
             />
           </div>
         </div>
@@ -1150,7 +2883,61 @@ export function App() {
         }
         path="/app"
       />
-      <Route element={<Navigate to="/app" replace />} path="*" />
+      <Route
+        element={
+          <InviteAccessGate>
+            <InvitePage />
+          </InviteAccessGate>
+        }
+        path="/invite/:token"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<LoadingScreen />}>
+              <NoiseSuppressionLab />
+            </Suspense>
+          </ProtectedRoute>
+        }
+        path="/audio/noise-lab"
+      />
+      <Route element={<Navigate replace to="/app" />} path="*" />
     </Routes>
+  );
+}
+
+function InvitePage() {
+  const { token = '' } = useParams();
+  const navigate = useNavigate();
+  const mutation = useMutation({
+    mutationFn: () => api.joinInvite(token),
+    onSuccess: ({ chatId }) =>
+      navigate(`/app?chat=${encodeURIComponent(chatId)}`, { replace: true }),
+  });
+  useEffect(() => {
+    if (token) mutation.mutate();
+  }, [token]);
+  return (
+    <main className="flex min-h-screen items-center justify-center p-6">
+      <section className="brand-modal grid max-w-md gap-4 p-6 text-center">
+        <h1 className="brand-display text-xl">Приглашение в комнату</h1>
+        <p className="text-sm text-[var(--muted)]">
+          {mutation.isPending
+            ? 'Подключаем...'
+            : mutation.isError
+              ? errorMessage(mutation.error)
+              : 'Готово'}
+        </p>
+        {mutation.isError && (
+          <button
+            className={brandPrimaryButtonCompactClassName}
+            onClick={() => navigate('/app')}
+            type="button"
+          >
+            Вернуться в приложение
+          </button>
+        )}
+      </section>
+    </main>
   );
 }

@@ -15,6 +15,12 @@ import { registerAuthRoutes } from './routes/auth.js';
 import { registerChatRoutes } from './routes/chats.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerVoiceRoutes } from './routes/voice.js';
+import { registerInviteRoutes } from './routes/invites.js';
+import { registerGuestRoutes } from './routes/guest.js';
+import { getAuthorizationPrincipal } from './lib/principal.js';
+import { consumeGuestRateLimit } from './services/guest-rate-limit.js';
+import { registerGuestVoiceExpiry } from './services/guest-voice.js';
+import { registerAttachmentRoutes } from './routes/attachments.js';
 
 const appOrigin = new URL(env.APP_URL).origin;
 const devOrigins = new Set(['localhost', '127.0.0.1']);
@@ -33,13 +39,24 @@ function isAllowedOrigin(origin?: string | null) {
 
 export async function buildApp() {
   const app = Fastify({
-    logger: true,
+    logger: {
+      redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: (request.url?.split('?')[0] ?? '').replace(/\/invites\/[^/]+/u, '/invites/[redacted]'),
+          };
+        },
+      },
+    },
     trustProxy: env.NODE_ENV === 'production',
     bodyLimit: 64 * 1024,
   });
 
   await app.register(cors, {
     origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
   await app.register(helmet, {
@@ -48,6 +65,11 @@ export async function buildApp() {
   });
   await app.register(cookie, { secret: env.COOKIE_SECRET });
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
+  app.addHook('preHandler', async (request) => {
+    if (!request.headers.cookie?.includes('goida-guest-session=')) return;
+    const principal = await getAuthorizationPrincipal(request.headers);
+    if (principal?.kind === 'guest') await consumeGuestRateLimit(`http:${principal.id}`, 60);
+  });
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -90,14 +112,19 @@ export async function buildApp() {
     },
   });
 
-  app.get('/health', async () => ({ status: 'ok', service: 'api' }));
-  await registerAuthRoutes(app);
-  await registerUserRoutes(app);
+  app.get('/health', async () => ({ status: 'ok', service: 'api', revision: env.RELEASE_SHA }));
+  await registerAuthRoutes(app, io);
+  await registerGuestRoutes(app, io);
+  await registerUserRoutes(app, io);
   await registerChatRoutes(app, io);
   await registerVoiceRoutes(app);
-  registerRealtime(io, app.log);
+  await registerInviteRoutes(app, io);
+  await registerAttachmentRoutes(app, io);
+  const stopRealtime = registerRealtime(io, app.log);
+  registerGuestVoiceExpiry(app);
 
   app.addHook('onClose', async () => {
+    await stopRealtime();
     io.close();
     valkey.disconnect();
     await prisma.$disconnect();

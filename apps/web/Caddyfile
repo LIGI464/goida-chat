@@ -9,5 +9,7 @@
 		Permissions-Policy "camera=(self), microphone=(self), geolocation=(), payment=(), usb=()"
 	}
 	try_files {path} /index.html
+	@fresh path /index.html /sw.js /registerSW.js /version.json /manifest.webmanifest
+	header @fresh Cache-Control "no-cache, no-store, must-revalidate"
 	file_server
 }

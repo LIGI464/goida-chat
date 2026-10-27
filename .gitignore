@@ -9,4 +9,12 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+.codex-worktrees/
+.codex-logs/
+.tmp/
+EZPowerPoint/
+backups/
+*.user-backup
 services/api/prisma/dev.db
+data/attachments/
+services/api/data/attachments/

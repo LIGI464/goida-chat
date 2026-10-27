@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import type { Server as SocketServer } from 'socket.io';
 import { updateProfileSchema } from '@goida-chat/shared';
 
 import { badRequest } from '../lib/http.js';
@@ -6,7 +7,7 @@ import { prisma } from '../lib/prisma.js';
 import { requireSession, publicUser } from '../lib/session.js';
 import { publicUserSelect } from '../services/chat.js';
 
-export async function registerUserRoutes(app: FastifyInstance) {
+export async function registerUserRoutes(app: FastifyInstance, io: SocketServer) {
   app.get(
     '/users/search',
     { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
@@ -80,6 +81,31 @@ export async function registerUserRoutes(app: FastifyInstance) {
         data: updateData,
         select: publicUserSelect,
       });
+
+      const memberships = await prisma.chatMember.findMany({
+        where: { userId: session.user.id },
+        select: { chatId: true },
+      });
+      const chatIds = memberships.map((membership) => membership.chatId);
+
+      if (chatIds.length > 0) {
+        const relatedMembers = await prisma.chatMember.findMany({
+          where: { chatId: { in: chatIds } },
+          select: { userId: true },
+        });
+        const relatedUserIds = [...new Set(relatedMembers.map((member) => member.userId))];
+
+        for (const chatId of chatIds) {
+          io.to(`chat:${chatId}`).emit('user:updated', { user: publicUser(user) });
+        }
+
+        for (const userId of relatedUserIds) {
+          io.to(`user:${userId}`).emit('user:updated', { user: publicUser(user) });
+          io.to(`user:${userId}`).emit('chat:list:invalidate');
+        }
+      } else {
+        io.to(`user:${session.user.id}`).emit('user:updated', { user: publicUser(user) });
+      }
 
       return { user: publicUser(user) };
     },

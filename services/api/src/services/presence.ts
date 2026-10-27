@@ -60,6 +60,10 @@ export async function clearTypingPresence(userId: string, chatIds: Iterable<stri
 
 export async function getTypingUsers(chatId: string) {
   const userIds = await valkey.smembers(typingKey(chatId));
+  return getPresenceUsers(chatId, userIds);
+}
+
+export async function getPresenceUsers(chatId: string, userIds: string[]) {
   if (userIds.length === 0) return [];
 
   const users = await prisma.user.findMany({
@@ -73,5 +77,11 @@ export async function getTypingUsers(chatId: string) {
     },
   });
 
-  return users;
+  const guests = await prisma.guestSession.findMany({
+    where: { chatId, guestId: { in: userIds }, expiresAt: { gt: new Date() } },
+    select: { guestId: true, displayName: true },
+  });
+  return [...users, ...guests.map((guest) => ({
+    id: guest.guestId, name: guest.displayName, username: null, displayUsername: null, image: null,
+  }))];
 }

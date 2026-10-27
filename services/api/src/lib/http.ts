@@ -18,3 +18,11 @@ export function notFound(message = 'Not found') {
 export function badRequest(message = 'Bad request') {
   return new HttpError(400, message);
 }
+
+export function forbidden(message = 'Forbidden') {
+  return new HttpError(403, message);
+}
+
+export function gone(message = 'Gone') {
+  return new HttpError(410, message);
+}

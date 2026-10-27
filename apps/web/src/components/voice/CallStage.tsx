@@ -1,0 +1,242 @@
+import {
+  useConnectionState,
+  useLocalParticipant,
+  useParticipants,
+  useRemoteParticipants,
+  useTracks,
+} from '@livekit/components-react';
+import type { TrackReferenceOrPlaceholder } from '@livekit/components-core';
+import { ConnectionState, Track } from 'livekit-client';
+import { useEffect, useMemo } from 'react';
+
+import { useAudioLevelMeter } from '../../features/voice/audio/useAudioLevelMeter';
+import type {
+  NoiseSuppressionMode,
+  VoiceCapturePreferences,
+} from '../../features/voice/audio/audioConstraints';
+import type { NoiseSuppressionRuntimeState } from '../../features/voice/audio/useNoiseSuppression';
+import { DEFAULT_VOICE_PEER_VOLUME } from '../../features/voice/audio/usePersistentPeerVolumes';
+import type { Chat, PublicUser } from '../../lib/api';
+import { AudioSettingsDrawer } from './AudioSettingsDrawer';
+import { CallControls } from './CallControls';
+import { ParticipantTile } from './ParticipantTile';
+import { ScreenShareTile } from './ScreenShareTile';
+
+function resolveParticipantUserId(participant: { identity: string; metadata?: string }) {
+  if (participant.metadata) {
+    try {
+      const parsed = JSON.parse(participant.metadata) as { userId?: unknown };
+      if (typeof parsed.userId === 'string' && parsed.userId) {
+        return parsed.userId;
+      }
+    } catch {
+      // Fall back to LiveKit identity when metadata is absent or malformed.
+    }
+  }
+
+  return participant.identity;
+}
+
+function connectionLabel(connectionState: ConnectionState) {
+  if (connectionState === ConnectionState.Reconnecting) {
+    return 'Переподключаемся';
+  }
+
+  if (connectionState === ConnectionState.SignalReconnecting) {
+    return 'Восстанавливаем сигнал';
+  }
+
+  return 'Связь стабильна';
+}
+
+export function CallStage({
+  chat,
+  users,
+  deafened,
+  onToggleDeafen,
+  onLeaveVoice,
+  onOpenSettings,
+  onCloseSettings,
+  settingsOpen,
+  activeDeviceId,
+  devices,
+  capturePreferences,
+  setCapturePreferences,
+  setMicDeviceId,
+  noiseSuppressionMode,
+  noiseSuppressionState,
+  setNoiseSuppressionMode,
+  remoteParticipantVolumes,
+  onRemoteParticipantVolumeChange,
+}: {
+  chat: Chat;
+  users: PublicUser[];
+  deafened: boolean;
+  onToggleDeafen: () => void;
+  onLeaveVoice: () => void;
+  onOpenSettings: () => void;
+  onCloseSettings: () => void;
+  settingsOpen: boolean;
+  activeDeviceId: string;
+  devices: MediaDeviceInfo[];
+  capturePreferences: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>;
+  setCapturePreferences: (
+    next: Omit<VoiceCapturePreferences, 'micDeviceId' | 'noiseSuppressionMode'>,
+  ) => void;
+  setMicDeviceId: (next: string) => void;
+  noiseSuppressionMode: NoiseSuppressionMode;
+  noiseSuppressionState: NoiseSuppressionRuntimeState;
+  setNoiseSuppressionMode: (next: NoiseSuppressionMode) => void;
+  remoteParticipantVolumes: Record<string, number>;
+  onRemoteParticipantVolumeChange: (remoteUserId: string, nextValue: number) => void;
+}) {
+  const connectionState = useConnectionState();
+  const participants = useParticipants();
+  const remoteParticipants = useRemoteParticipants();
+  const trackRefs = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }]);
+  const screenTrackRefs = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }]);
+  const { microphoneTrack } = useLocalParticipant();
+  const meterTrack = microphoneTrack?.audioTrack?.mediaStreamTrack;
+  const meter = useAudioLevelMeter(meterTrack, noiseSuppressionMode);
+  const userMap = useMemo(() => new Map(users.map((user) => [user.id, user])), [users]);
+
+  useEffect(() => {
+    for (const participant of remoteParticipants) {
+      const remoteUserId = resolveParticipantUserId(participant);
+      const nextVolume = remoteParticipantVolumes[remoteUserId];
+      participant.setVolume((nextVolume ?? DEFAULT_VOICE_PEER_VOLUME) / 100);
+    }
+  }, [remoteParticipantVolumes, remoteParticipants]);
+
+  const hasCamera = participants.some((participant) => participant.isCameraEnabled);
+  const participantCount = participants.length;
+  const tileCount = participantCount + screenTrackRefs.length;
+  const stageViewportClass =
+    screenTrackRefs.length > 0
+      ? 'min-h-[240px] max-h-[min(52vh,520px)]'
+      : participantCount === 1
+        ? 'min-h-[220px] max-h-[min(34vh,320px)] md:min-h-[240px] md:max-h-[min(38vh,360px)]'
+        : hasCamera
+          ? 'min-h-[240px] max-h-[min(44vh,420px)]'
+          : 'min-h-[220px] max-h-[min(38vh,360px)]';
+  const participantGridClass =
+    tileCount === 1
+      ? 'mx-auto max-w-[420px] grid-cols-1'
+      : tileCount === 2
+        ? 'mx-auto max-w-5xl grid-cols-1 md:grid-cols-2'
+        : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3';
+
+  const remoteVolumes = remoteParticipants.map((participant) => {
+    const remoteUserId = resolveParticipantUserId(participant);
+
+    return {
+      remoteUserId,
+      label: `@${userMap.get(remoteUserId)?.username ?? participant.name ?? remoteUserId}`,
+      value: remoteParticipantVolumes[remoteUserId] ?? DEFAULT_VOICE_PEER_VOLUME,
+    };
+  });
+
+  return (
+    <section className="shrink-0 min-w-0 border-b brand-divider bg-[var(--bg)] px-4 py-3 md:px-6">
+      <div className="brand-card relative overflow-hidden rounded-[28px]">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_30%),linear-gradient(140deg,rgba(255,255,255,0.02),transparent_45%)]" />
+        <div className="relative flex flex-col gap-3 border-b brand-divider px-4 py-3.5 md:px-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex flex-wrap items-center gap-2">
+              <p className="brand-display truncate text-base font-semibold text-[var(--text)]">
+                {chat.displayTitle ?? chat.title ?? 'Комната'}
+              </p>
+              <span className="brand-pill text-[11px] text-[var(--muted)]">
+                {participants.length} в звонке
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+              <span className="inline-flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-400" />
+                {connectionLabel(connectionState)}
+              </span>
+              {users.length > 0 && (
+                <span className="truncate">
+                  {users
+                    .map((user) => `@${user.username ?? user.name}`)
+                    .slice(0, 4)
+                    .join(' / ')}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <CallControls
+            deafened={deafened}
+            onLeaveVoice={onLeaveVoice}
+            onOpenSettings={onOpenSettings}
+            onToggleDeafen={onToggleDeafen}
+          />
+        </div>
+
+        <div className="px-4 pb-4 pt-3 md:px-5">
+          <div
+            className={`voice-stage-scroll min-w-0 overflow-y-auto overflow-x-hidden pr-1 ${stageViewportClass}`}
+          >
+            <div className={`grid auto-rows-fr gap-3 ${participantGridClass}`}>
+              {screenTrackRefs.map((trackRef) => {
+                const participant = trackRef.participant;
+                const remoteUserId = resolveParticipantUserId(participant);
+                const user = userMap.get(remoteUserId);
+                const displayName = `@${
+                  user?.username ?? participant.name ?? user?.name ?? remoteUserId
+                }`;
+
+                return (
+                  <ScreenShareTile
+                    displayName={displayName}
+                    key={`screen-${trackRef.publication?.trackSid ?? participant.identity}`}
+                    participant={participant}
+                    trackRef={trackRef}
+                  />
+                );
+              })}
+              {participants.map((participant) => {
+                const trackRef = trackRefs.find(
+                  (candidate) => candidate.participant.identity === participant.identity,
+                ) as TrackReferenceOrPlaceholder | undefined;
+                const remoteUserId = resolveParticipantUserId(participant);
+                const user = userMap.get(remoteUserId);
+                const displayName = `@${
+                  user?.username ?? participant.name ?? user?.name ?? remoteUserId
+                }`;
+
+                return (
+                  <ParticipantTile
+                    compact={participantCount === 1}
+                    displayName={displayName}
+                    key={participant.identity}
+                    participant={participant}
+                    trackRef={trackRef}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        <AudioSettingsDrawer
+          activeDeviceId={activeDeviceId}
+          capturePreferences={capturePreferences}
+          devices={devices}
+          micLevel={meter.level}
+          micSpeaking={meter.speaking}
+          noiseSuppressionMode={noiseSuppressionMode}
+          noiseSuppressionState={noiseSuppressionState}
+          onClose={onCloseSettings}
+          onRemoteVolumeChange={onRemoteParticipantVolumeChange}
+          open={settingsOpen}
+          remoteVolumes={remoteVolumes}
+          setCapturePreferences={setCapturePreferences}
+          setMicDeviceId={setMicDeviceId}
+          setNoiseSuppressionMode={setNoiseSuppressionMode}
+        />
+      </div>
+    </section>
+  );
+}

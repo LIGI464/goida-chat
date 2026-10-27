@@ -1,6 +1,6 @@
 {
   "name": "goida-chat",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "workspaces": [
     "apps/*",
@@ -8,24 +8,33 @@
     "packages/*"
   ],
   "scripts": {
+    "brand:assets": "node ./scripts/generate-goida-brand-assets.mjs",
     "dev": "concurrently -n web,api -c cyan,magenta \"npm run dev -w @goida-chat/web\" \"npm run dev -w @goida-chat/api\"",
     "build": "npm run build -w @goida-chat/shared && npm run build -w @goida-chat/api && npm run build -w @goida-chat/web",
     "typecheck": "npm run build -w @goida-chat/shared && npm run typecheck -w @goida-chat/shared && npm run typecheck -w @goida-chat/api && npm run typecheck -w @goida-chat/web",
     "lint": "eslint .",
+    "test:noise-lab": "node --import tsx --test apps/web/tests/noise-lab-metrics.test.ts",
+    "test:noise-lab:browser": "node --import tsx apps/web/tests/noise-lab-browser.mjs",
+    "test:noise-lab:serve": "npm run dev -w @goida-chat/web -- --config tests/vite.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:generate": "npm run db:generate -w @goida-chat/api",
     "db:migrate": "npm run db:migrate -w @goida-chat/api",
     "db:deploy": "npm run db:deploy -w @goida-chat/api",
-    "db:seed": "npm run db:seed -w @goida-chat/api"
+    "db:seed": "npm run db:seed -w @goida-chat/api",
+    "qa:smoke-matrix": "node ./scripts/parallel-feature-smoke-matrix.mjs",
+    "qa:smoke-matrix:markdown": "node ./scripts/parallel-feature-smoke-matrix.mjs --markdown"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
+    "@resvg/resvg-js": "^2.6.2",
     "concurrently": "^9.0.0",
+    "effect": "3.21.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.0.0",
-    "effect": "3.21.0",
     "globals": "^16.0.0",
+    "opentype.js": "^2.0.0",
+    "png-to-ico": "^3.0.1",
     "prettier": "^3.0.0",
     "typescript-eslint": "^8.0.0"
   },
