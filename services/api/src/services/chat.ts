@@ -23,6 +23,7 @@ export const messageSelect = {
   editedAt: true,
   user: { select: publicUserSelect },
   guestSession: true,
+  attachments: { select: { id: true, originalName: true, mimeType: true, size: true, status: true, expiresAt: true } },
 } satisfies Prisma.MessageSelect;
 
 export const chatInclude = {
@@ -85,6 +86,10 @@ export function serializeMessage(message: MessageWithUser) {
     createdAt: message.createdAt,
     editedAt: message.editedAt,
     user,
+    attachments: message.attachments.map((attachment) => ({
+      ...attachment,
+      status: attachment.expiresAt.getTime() <= Date.now() ? 'expired' as const : attachment.status,
+    })),
   };
 }
 

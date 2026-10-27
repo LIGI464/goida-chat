@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test:guest": "node --import tsx --test test/guest-access.test.mjs",
+    "test:attachments": "npm run build -w @goida-chat/shared && node --import tsx --test test/attachments.test.ts",
     "dev": "node --env-file ../../.env --watch --import tsx src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file ../../.env dist/server.js",
@@ -19,6 +20,7 @@
     "@fastify/cookie": "^11.0.0",
     "@fastify/cors": "^11.0.0",
     "@fastify/helmet": "^13.0.2",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/rate-limit": "^10.0.0",
     "@goida-chat/shared": "*",
     "@prisma/client": "^6.19.0",

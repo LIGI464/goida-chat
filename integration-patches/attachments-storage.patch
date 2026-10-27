@@ -1,0 +1,18 @@
+diff --git a/docker-compose.yml b/docker-compose.yml
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -31,6 +31,9 @@ services:
+       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit.localhost}
+       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
+       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-change_me_livekit_secret_at_least_32_chars}
++      ATTACHMENTS_STORAGE_ROOT: /var/lib/goida/attachments
++    volumes:
++      - attachments_data:/var/lib/goida/attachments
+     depends_on:
+       postgres:
+         condition: service_healthy
+@@ -134,3 +137,4 @@ volumes:
+   valkey_data:
+   caddy_data:
+   caddy_config:
++  attachments_data:

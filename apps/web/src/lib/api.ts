@@ -25,7 +25,21 @@ export type Message = {
   createdAt: string;
   editedAt?: string | null;
   user: PublicUser;
+  attachments: Attachment[];
 };
+
+export type Attachment = {
+  id: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  status: 'active' | 'expired' | 'uploading';
+  expiresAt: string;
+};
+
+export class ApiError extends Error {
+  constructor(message: string, public readonly status: number) { super(message); }
+}
 
 export type Chat = {
   id: string;
@@ -85,7 +99,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       credentials: 'include',
       headers: {
-        ...(init?.body ? { 'content-type': 'application/json' } : {}),
+        ...(init?.body && !(init.body instanceof FormData) ? { 'content-type': 'application/json' } : {}),
         ...init?.headers,
       },
     });
@@ -130,6 +144,15 @@ export const api = {
   },
   endGuestSession() {
     return apiFetch<{ ok: true }>('/auth/guest/sign-out', { method: 'POST' });
+  },
+  uploadAttachment(chatId: string, file: File, text: string, signal: AbortSignal) {
+    const form = new FormData();
+    form.append('text', text);
+    form.append('file', file);
+    return apiFetch<{ message: Message }>(`/chats/${chatId}/attachments`, { method: 'POST', body: form, signal });
+  },
+  attachmentUrl(chatId: string, attachmentId: string, mode: 'download' | 'preview') {
+    return apiFetch<{ url: string; expiresAt: string }>(`/chats/${chatId}/attachments/${attachmentId}/url?mode=${mode}`);
   },
   searchUsers(username: string) {
     return apiFetch<{ users: PublicUser[] }>(

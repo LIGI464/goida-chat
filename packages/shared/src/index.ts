@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export * from './attachments.js';
 
 export const usernameSchema = z
   .string()

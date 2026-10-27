@@ -131,10 +131,35 @@ model Message {
   chat      Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
   user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
   guestSession GuestSession? @relation(fields: [guestSessionId], references: [id], onDelete: Cascade)
+  attachments Attachment[]
 
   @@index([chatId, createdAt, id])
   @@index([userId])
   @@index([guestSessionId])
+}
+
+enum AttachmentStatus {
+  uploading
+  active
+  expired
+}
+
+model Attachment {
+  id               String           @id @default(cuid())
+  messageId        String?
+  storageKey       String           @unique
+  originalName     String
+  mimeType         String
+  size             Int              @default(0)
+  status           AttachmentStatus @default(uploading)
+  expiresAt        DateTime
+  createdAt        DateTime         @default(now())
+  storageDeletedAt DateTime?
+  message          Message?         @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([messageId])
+  @@index([storageDeletedAt, expiresAt])
+  @@index([status, createdAt])
 }
 
 model VoiceRoom {

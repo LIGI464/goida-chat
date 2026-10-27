@@ -10,3 +10,5 @@ coverage/
 .idea/
 .vscode/
 services/api/prisma/dev.db
+data/attachments/
+services/api/data/attachments/

@@ -5,6 +5,7 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(3000),
   APP_URL: z.string().url().default('http://localhost:5173'),
+  ATTACHMENTS_STORAGE_ROOT: z.string().min(1).default('data/attachments'),
   DATABASE_URL: z.string().min(1),
   VALKEY_URL: z.string().min(1).default('redis://localhost:6379'),
   COOKIE_SECRET: z.string().min(32),

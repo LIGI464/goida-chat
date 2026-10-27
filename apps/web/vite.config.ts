@@ -9,6 +9,10 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
+      workbox: {
+        // API downloads opened in a tab must reach the server, not the SPA shell.
+        navigateFallbackDenylist: [/^\/chats\//],
+      },
       includeAssets: [
         'favicon.ico',
         'favicon-16.png',

@@ -20,6 +20,7 @@ import { registerGuestRoutes } from './routes/guest.js';
 import { getAuthorizationPrincipal } from './lib/principal.js';
 import { consumeGuestRateLimit } from './services/guest-rate-limit.js';
 import { registerGuestVoiceExpiry } from './services/guest-voice.js';
+import { registerAttachmentRoutes } from './routes/attachments.js';
 
 const appOrigin = new URL(env.APP_URL).origin;
 const devOrigins = new Set(['localhost', '127.0.0.1']);
@@ -108,6 +109,7 @@ export async function buildApp() {
   await registerChatRoutes(app, io);
   await registerVoiceRoutes(app);
   await registerInviteRoutes(app, io);
+  await registerAttachmentRoutes(app, io);
   registerRealtime(io, app.log);
   registerGuestVoiceExpiry(app);
 

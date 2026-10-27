@@ -1,5 +1,10 @@
 import { LiveKitRoom } from '@livekit/components-react';
-import { signInSchema, signUpSchema } from '@goida-chat/shared';
+import {
+  signInSchema,
+  signUpSchema,
+  MAX_ATTACHMENT_BYTES,
+  ATTACHMENT_ACCEPT,
+} from '@goida-chat/shared';
 import {
   type InfiniteData,
   type QueryClient,
@@ -35,6 +40,7 @@ import { InviteAccessGate } from './components/InviteAccessGate';
 import { usePrincipalSession } from './lib/principal-session';
 import { pendingInvitePath } from './lib/invite-return';
 import { ChatActionsMenu, type ChatActionItem } from './components/chat/ChatActionsMenu';
+import { AttachmentCard, formatFileSize } from './components/chat/AttachmentCard';
 import { ConnectedVoiceRuntime, VoicePanel } from './components/voice/VoicePanel';
 import {
   buildAudioCaptureOptions,
@@ -1317,7 +1323,7 @@ function ChatSidebar({
                   </div>
                 </div>
                 <p className="truncate text-xs text-[var(--muted)]">
-                  {chat.lastMessage?.text ?? (members || 'Пусто')}
+                  {chat.lastMessage?.text || chat.lastMessage?.attachments?.[0]?.originalName || members || 'Пусто'}
                 </p>
               </button>
 
@@ -1827,6 +1833,11 @@ function ChatView({
 }) {
   const queryClient = useQueryClient();
   const [text, setText] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const uploadRef = useRef<AbortController | null>(null);
+  useEffect(() => () => uploadRef.current?.abort(), []);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [typingUserIds, setTypingUserIds] = useState<string[]>([]);
@@ -1876,8 +1887,32 @@ function ChatView({
   async function send(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const value = text.trim();
-    if (!value) return;
+    if (uploading || (!value && !file)) return;
     setError(null);
+
+    if (file) {
+      const controller = new AbortController();
+      uploadRef.current = controller;
+      setUploading(true);
+      try {
+        const { message } = await api.uploadAttachment(chat.id, file, value, controller.signal);
+        queryClient.setQueryData<MessagesInfinite>(['messages', chat.id], (old) =>
+          appendMessageToPages(old, message),
+        );
+        queryClient.setQueryData<ChatListData>(['chats'], (old) =>
+          patchChatsWithMessage(old, message, currentUserId, chat.id),
+        );
+        setText('');
+        setFile(null);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      } catch (caught) {
+        if (!controller.signal.aborted) setError(errorMessage(caught));
+      } finally {
+        setUploading(false);
+        uploadRef.current = null;
+      }
+      return;
+    }
 
     if (socket?.connected) {
       socket.emit('message:send', { chatId: chat.id, text: value }, (response) => {
@@ -2172,6 +2207,9 @@ function ChatView({
                   <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-sm leading-6 text-[var(--text)]">
                     {message.text}
                   </p>
+                  {message.attachments?.map((attachment) => (
+                    <AttachmentCard key={attachment.id} attachment={attachment} chatId={chat.id} />
+                  ))}
                 </div>
               );
             })}
@@ -2180,6 +2218,48 @@ function ChatView({
       </div>
 
       <footer className="shrink-0 border-t brand-divider bg-[rgba(11,12,15,0.92)] px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-[var(--muted)]">
+          <input
+            type="file"
+            accept={ATTACHMENT_ACCEPT}
+            className="hidden"
+            ref={fileInputRef}
+            onChange={(event) => {
+              const selected = event.target.files?.[0];
+              if (!selected) return;
+              if (!selected.size || selected.size > MAX_ATTACHMENT_BYTES) {
+                setError('Выбери непустой файл размером до 100 МБ');
+                event.target.value = '';
+                return;
+              }
+              setError(null);
+              setFile(selected);
+            }}
+          />
+          <button
+            className={brandSecondaryButtonCompactClassName}
+            disabled={uploading}
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            Прикрепить файл
+          </button>
+          {file ? (
+            <>
+              <span className="max-w-xs truncate">{file.name} · {formatFileSize(file.size)}</span>
+              <button type="button" disabled={uploading} onClick={() => {
+                setFile(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}>Убрать</button>
+            </>
+          ) : <span>До 100 МБ · хранение 14 дней</span>}
+          {uploading && (
+            <>
+              <span role="status">Загрузка…</span>
+              <button type="button" onClick={() => uploadRef.current?.abort()}>Отмена</button>
+            </>
+          )}
+        </div>
         {error && <p className="mb-2 text-sm text-[var(--danger)]">{error}</p>}
         {typingUsers.length > 0 && (
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
@@ -2191,10 +2271,12 @@ function ChatView({
             maxLength={4000}
             onChange={(event) => setText(event.target.value)}
             placeholder="Написать сообщение..."
+            disabled={uploading}
             value={text}
           />
           <button
             className={`${brandPrimaryButtonCompactClassName} min-w-[100px] shrink-0 whitespace-nowrap px-4`}
+            disabled={uploading}
           >
             Отправить
           </button>
@@ -2626,6 +2708,7 @@ function ChatLayout() {
   ) : null;
   const rightPaneContent = selectedChat ? (
     <ChatView
+      key={selectedChat.id}
       chat={selectedChat}
       isGuest={data?.kind === 'guest'}
       currentUserId={currentUser.id}
