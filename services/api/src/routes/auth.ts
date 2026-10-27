@@ -2,16 +2,23 @@ import type { FastifyInstance } from 'fastify';
 import { fromNodeHeaders } from 'better-auth/node';
 
 import { auth } from '../auth.js';
+import { getAuthorizationPrincipal } from '../lib/principal.js';
 
 export async function registerAuthRoutes(app: FastifyInstance) {
   app.get('/auth/me', async (request, reply) => {
-    const session = await auth.api.getSession({
-      headers: fromNodeHeaders(request.headers),
-    });
+    const principal = await getAuthorizationPrincipal(request.headers);
 
-    if (!session) {
+    if (!principal) {
       return reply.code(401).send({ error: 'Unauthorized' });
     }
+
+    if (principal.kind === 'guest') {
+      return {
+        kind: principal.kind, user: principal.user, session: principal.session,
+        chatId: principal.chatId, inviteToken: principal.inviteToken,
+      };
+    }
+    const session = principal;
 
     const user = session.user as typeof session.user & {
       username?: string | null;
@@ -19,6 +26,7 @@ export async function registerAuthRoutes(app: FastifyInstance) {
     };
 
     return {
+      kind: 'user',
       user: {
         id: user.id,
         email: user.email,

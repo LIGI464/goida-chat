@@ -42,8 +42,20 @@ export type Chat = {
 };
 
 export type SessionUser = PublicUser & {
-  email: string;
+  email: string | null;
 };
+
+export type PrincipalSession = {
+  kind: 'user' | 'guest';
+  user: SessionUser;
+  session: { id: string; expiresAt: string };
+  chatId?: string;
+  inviteToken?: string;
+};
+
+class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
 
 export type VoiceToken = {
   token: string;
@@ -97,13 +109,28 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
       payload?.error ??
       (fallbackText || `API request failed with status ${response.status}`);
 
-    throw new Error(errorText);
+    throw new ApiError(errorText, response.status);
   }
 
   return response.json() as Promise<T>;
 }
 
 export const api = {
+  async getSession() {
+    try { return await apiFetch<PrincipalSession>('/auth/me'); }
+    catch (error) {
+      if (error instanceof ApiError && error.status === 401) return null;
+      throw error;
+    }
+  },
+  startGuestSession(token: string) {
+    return apiFetch<PrincipalSession>('/auth/guest/start', {
+      method: 'POST', body: JSON.stringify({ token }),
+    });
+  },
+  endGuestSession() {
+    return apiFetch<{ ok: true }>('/auth/guest/sign-out', { method: 'POST' });
+  },
   searchUsers(username: string) {
     return apiFetch<{ users: PublicUser[] }>(
       `/users/search?username=${encodeURIComponent(username)}`,

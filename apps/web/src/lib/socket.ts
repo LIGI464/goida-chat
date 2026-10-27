@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import { apiUrl, type Chat, type Message, type PublicUser } from './api';
 
 export type ServerToClientEvents = {
+  'session:expired': () => void;
   'message:new': (message: Message) => void;
   'message:error': (payload: { message: string }) => void;
   'voice:presence:update': (payload: { chatId: string; users: PublicUser[] }) => void;

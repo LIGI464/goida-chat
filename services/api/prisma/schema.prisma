@@ -81,6 +81,7 @@ model Chat {
   messages    Message[]
   voiceRoom   VoiceRoom?
   invites     ChatInvite[]
+  guestSessions GuestSession[]
 
   @@index([updatedAt])
 }
@@ -88,6 +89,21 @@ model Chat {
 enum ChatType {
   direct
   group
+}
+
+model GuestSession {
+  id          String   @id @default(cuid())
+  guestId     String   @unique
+  displayName String
+  inviteToken String
+  chatId      String
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  chat        Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  messages    Message[]
+
+  @@index([chatId, expiresAt])
+  @@index([expiresAt])
 }
 
 model ChatMember {
@@ -107,15 +123,18 @@ model ChatMember {
 model Message {
   id        String    @id @default(cuid())
   chatId    String
-  userId    String
+  userId    String?
+  guestSessionId String?
   text      String
   createdAt DateTime  @default(now())
   editedAt  DateTime?
   chat      Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guestSession GuestSession? @relation(fields: [guestSessionId], references: [id], onDelete: Cascade)
 
   @@index([chatId, createdAt, id])
   @@index([userId])
+  @@index([guestSessionId])
 }
 
 model VoiceRoom {

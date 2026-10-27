@@ -31,6 +31,9 @@ import {
 import { z } from 'zod';
 
 import { GoidaLogo } from './components/brand/GoidaLogo';
+import { InviteAccessGate } from './components/InviteAccessGate';
+import { usePrincipalSession } from './lib/principal-session';
+import { pendingInvitePath } from './lib/invite-return';
 import { ChatActionsMenu, type ChatActionItem } from './components/chat/ChatActionsMenu';
 import { ConnectedVoiceRuntime, VoicePanel } from './components/voice/VoicePanel';
 import {
@@ -78,7 +81,7 @@ const registrationSchema = signUpSchema
 type MessagesPage = { messages: Message[]; nextCursor: string | null };
 type MessagesInfinite = InfiniteData<MessagesPage, string | null>;
 type ChatListData = { chats: Chat[] };
-type CurrentUser = { id: string; name: string; username?: string | null };
+type CurrentUser = { id: string; name: string; username?: string | null; isGuest?: boolean };
 type VoiceDisconnectAction = 'leave' | 'removed' | 'switch';
 
 const brandInputClassName = 'brand-input h-11 px-4 text-sm';
@@ -405,21 +408,26 @@ function patchUserCaches(queryClient: QueryClient, user: PublicUser, currentUser
 }
 
 function PublicOnly({ children }: { children: ReactNode }) {
-  const { data, isPending } = authClient.useSession();
+  const { data, isPending } = usePrincipalSession();
   if (isPending) return <LoadingScreen />;
-  if (data) return <Navigate replace to="/app" />;
+  if (data?.kind === 'user') return <Navigate replace to={pendingInvitePath() ?? '/app'} />;
   return children;
 }
 
 function ProtectedRoute({ children }: { children: ReactNode }) {
   const location = useLocation();
-  const { data, isPending } = authClient.useSession();
+  const { data, isPending } = usePrincipalSession();
+  const guestReturn = useRef<string | null>(null);
+  useEffect(() => {
+    if (data?.kind === 'guest' && data.inviteToken) guestReturn.current = `/invite/${encodeURIComponent(data.inviteToken)}`;
+  }, [data?.kind, data?.inviteToken]);
   if (isPending) return <LoadingScreen />;
-  if (!data) return <Navigate replace state={{ from: location.pathname }} to="/login" />;
+  if (!data) return <Navigate replace state={{ from: location.pathname }} to={guestReturn.current ?? '/login'} />;
   return children;
 }
 
 function AuthCard({ mode }: { mode: 'login' | 'register' }) {
+  const queryClient = useQueryClient();
   const register = mode === 'register';
   const navigate = useNavigate();
   const location = useLocation();
@@ -456,7 +464,10 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
         if (result.error) throw result.error;
       }
 
-      const from = (location.state as { from?: string } | null)?.from ?? '/app';
+      await api.endGuestSession();
+      const from = pendingInvitePath() ?? (location.state as { from?: string } | null)?.from ?? '/app';
+      queryClient.clear();
+      queryClient.setQueryData(['session'], await api.getSession());
       navigate(from, { replace: true });
     } catch (caught) {
       if (caught instanceof z.ZodError) {
@@ -589,6 +600,7 @@ function AuthCard({ mode }: { mode: 'login' | 'register' }) {
             <Link
               className="brand-link mt-5 inline-flex w-fit text-sm"
               to={register ? '/login' : '/register'}
+              state={location.state}
             >
               {register ? 'Уже есть аккаунт? Войти' : 'Создать аккаунт'}
             </Link>
@@ -784,7 +796,7 @@ function ChatSidebar({
   const userSearch = useQuery({
     queryKey: ['users', normalizedSearch],
     queryFn: () => api.searchUsers(normalizedSearch),
-    enabled: normalizedSearch.length >= 3,
+    enabled: !currentUser.isGuest && normalizedSearch.length >= 3,
   });
 
   const directMutation = useMutation({
@@ -925,6 +937,16 @@ function ChatSidebar({
     const next = event.currentTarget.querySelector<HTMLElement>(`[data-chat-index="${nextIndex}"]`);
     next?.focus();
   }
+
+  if (currentUser.isGuest) return (
+    <aside className="flex h-full flex-col gap-4 border-r brand-divider p-4">
+      <GoidaLogo variant="lockup" />
+      <p className="text-sm">{currentUser.name}</p>
+      <p className="text-sm text-[var(--muted)]">Гостевой доступ: только приглашённая комната, до двух часов.</p>
+      {chats.map((chat) => <button className={brandSecondaryButtonClassName} key={chat.id} onClick={() => onSelect(chat.id)} type="button">{chat.displayTitle ?? chat.title ?? 'Комната'}</button>)}
+      <button className={`${brandSecondaryButtonClassName} mt-auto`} onClick={onSignOut} type="button">Завершить гостевую сессию</button>
+    </aside>
+  );
 
   if (collapsed) {
     return (
@@ -1782,6 +1804,7 @@ function GroupSettingsModal({
 
 function ChatView({
   chat,
+  isGuest = false,
   currentUserId,
   onConsumeRoomPanelRequest,
   socket,
@@ -1792,6 +1815,7 @@ function ChatView({
   voicePanel,
 }: {
   chat: Chat;
+  isGuest?: boolean;
   currentUserId: string;
   onConsumeRoomPanelRequest: () => void;
   socket: ChatSocket | null;
@@ -2069,7 +2093,7 @@ function ChatView({
         </button>
 
         <div className="ml-4 flex shrink-0 items-center">
-          <ChatActionsMenu items={chatActions} />
+          {!isGuest && <ChatActionsMenu items={chatActions} />}
         </div>
       </header>
 
@@ -2177,7 +2201,7 @@ function ChatView({
         </form>
       </footer>
 
-      {chat.type === 'group' && (
+      {!isGuest && chat.type === 'group' && (
         <GroupSettingsModal
           chat={chat}
           onClose={() => setRoomPanelOpen(false)}
@@ -2191,9 +2215,9 @@ function ChatView({
 function ChatLayout() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const { data } = authClient.useSession();
+  const { data } = usePrincipalSession();
   const baseUser = data?.user as CurrentUser | undefined;
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null);
+  const [selectedChatId, setSelectedChatId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('chat'));
   const [socket, setSocket] = useState<ChatSocket | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [roomPanelRequestChatId, setRoomPanelRequestChatId] = useState<string | null>(null);
@@ -2212,6 +2236,15 @@ function ChatLayout() {
   useEffect(() => {
     writeStoredBoolean(SIDEBAR_RAIL_STORAGE_KEY, sidebarCollapsed);
   }, [sidebarCollapsed]);
+
+  useEffect(() => {
+    if (data?.kind !== 'guest') return;
+    const timer = setTimeout(() => {
+      queryClient.clear();
+      navigate(`/invite/${encodeURIComponent(data.inviteToken ?? '')}`, { replace: true });
+    }, Math.max(0, new Date(data.session.expiresAt).getTime() - Date.now()));
+    return () => clearTimeout(timer);
+  }, [data?.kind, data?.session.expiresAt, data?.inviteToken, queryClient, navigate]);
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
     [chats, selectedChatId],
@@ -2311,10 +2344,10 @@ function ChatLayout() {
       return;
     }
 
-    if (selectedChatId && !chats.some((chat) => chat.id === selectedChatId)) {
+    if (selectedChatId && chatsQuery.isSuccess && !chatsQuery.isFetching && !chats.some((chat) => chat.id === selectedChatId)) {
       setSelectedChatId(chats[0]?.id ?? null);
     }
-  }, [chats, selectedChatId]);
+  }, [chats, selectedChatId, chatsQuery.isSuccess, chatsQuery.isFetching]);
 
   useEffect(() => {
     if (!activeVoiceChatId) return;
@@ -2392,6 +2425,13 @@ function ChatLayout() {
 
     nextSocket.on('message:error', (payload) => {
       console.warn(payload.message);
+    });
+    nextSocket.on('session:expired', () => {
+      void queryClient.invalidateQueries({ queryKey: ['session'] });
+    });
+    nextSocket.on('connect', () => {
+      if (selectedChatIdRef.current) nextSocket.emit('chat:join', { chatId: selectedChatIdRef.current });
+      if (voicePresenceChatIdRef.current) nextSocket.emit('voice:join', { chatId: voicePresenceChatIdRef.current });
     });
 
     return () => {
@@ -2504,7 +2544,9 @@ function ChatLayout() {
   }
 
   async function signOut() {
-    await authClient.signOut();
+    await api.endGuestSession();
+    if (data?.kind !== 'guest') await authClient.signOut();
+    queryClient.clear();
     navigate('/login', { replace: true });
   }
 
@@ -2547,6 +2589,7 @@ function ChatLayout() {
   const currentUser: CurrentUser = {
     ...baseUser,
     username: localUsername ?? baseUser.username ?? baseUser.name,
+    isGuest: data?.kind === 'guest',
   };
   const voicePanel = selectedChat ? (
     <VoicePanel
@@ -2584,6 +2627,7 @@ function ChatLayout() {
   const rightPaneContent = selectedChat ? (
     <ChatView
       chat={selectedChat}
+      isGuest={data?.kind === 'guest'}
       currentUserId={currentUser.id}
       onConsumeRoomPanelRequest={() => setRoomPanelRequestChatId(null)}
       onBack={() => setSelectedChatId(null)}
@@ -2753,9 +2797,9 @@ export function App() {
       />
       <Route
         element={
-          <ProtectedRoute>
+          <InviteAccessGate>
             <InvitePage />
-          </ProtectedRoute>
+          </InviteAccessGate>
         }
         path="/invite/:token"
       />

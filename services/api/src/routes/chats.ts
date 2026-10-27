@@ -14,6 +14,7 @@ import { badRequest, forbidden, notFound } from '../lib/http.js';
 import { prisma } from '../lib/prisma.js';
 import { publicUser, requireSession } from '../lib/session.js';
 import { valkey } from '../lib/valkey.js';
+import { requirePrincipal, ensurePrincipalChatAccess } from '../lib/principal.js';
 import {
   chatInclude,
   createTextMessage,
@@ -28,6 +29,7 @@ import { getOnlineUserIds, getTypingUsers, removeTypingPresence } from '../servi
 import { getVoicePresence, removeVoicePresence } from '../services/voice-presence.js';
 
 async function unreadCount(chatId: string, userId: string) {
+  const otherAuthor = { OR: [{ userId: { not: userId } }, { guestSessionId: { not: null } }] };
   const membership = await prisma.chatMember.findUnique({
     where: { chatId_userId: { chatId, userId } },
     select: { lastReadMessageId: true },
@@ -43,7 +45,7 @@ async function unreadCount(chatId: string, userId: string) {
 
   if (!latest) return 0;
   if (!membership.lastReadMessageId) {
-    return prisma.message.count({ where: { chatId, userId: { not: userId } } });
+    return prisma.message.count({ where: { chatId, ...otherAuthor } });
   }
 
   if (membership.lastReadMessageId === latest.id) {
@@ -56,13 +58,13 @@ async function unreadCount(chatId: string, userId: string) {
   });
 
   if (!read) {
-    return prisma.message.count({ where: { chatId, userId: { not: userId } } });
+    return prisma.message.count({ where: { chatId, ...otherAuthor } });
   }
 
   return prisma.message.count({
     where: {
       chatId,
-      userId: { not: userId },
+      ...otherAuthor,
       createdAt: { gt: read.createdAt },
     },
   });
@@ -73,7 +75,7 @@ async function enrichChat(chat: ChatWithDetails, userId: string) {
   return {
     ...base,
     unreadCount: await unreadCount(chat.id, userId),
-    onlineMemberIds: await getOnlineUserIds(chat.members.map((member) => member.userId)),
+    onlineMemberIds: await getOnlineUserIds(base.members.map((member) => member.user.id)),
   };
 }
 
@@ -109,9 +111,11 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
   }
 
   app.get('/chats', async (request) => {
-    const session = await requireSession(request);
+    const session = await requirePrincipal(request);
     const chats = await prisma.chat.findMany({
-      where: { members: { some: { userId: session.user.id } } },
+      where: session.kind === 'guest'
+        ? { id: session.chatId }
+        : { members: { some: { userId: session.user.id } } },
       orderBy: { updatedAt: 'desc' },
       include: chatInclude,
     });
@@ -211,15 +215,15 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
   );
 
   app.get('/chats/:chatId', async (request) => {
-    const session = await requireSession(request);
+    const session = await requirePrincipal(request);
     const params = chatIdParamsSchema.parse(request.params);
+    await ensurePrincipalChatAccess(session, params.chatId);
     const chat = await prisma.chat.findUnique({
       where: { id: params.chatId },
       include: chatInclude,
     });
 
     if (!chat) throw notFound('Chat not found');
-    await ensureChatMember(session.user.id, params.chatId);
 
     return { chat: await enrichChat(chat, session.user.id) };
   });
@@ -244,9 +248,10 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
   });
 
   app.post('/chats/:chatId/read', async (request) => {
-    const session = await requireSession(request);
+    const session = await requirePrincipal(request);
     const params = chatIdParamsSchema.parse(request.params);
-    await ensureChatMember(session.user.id, params.chatId);
+    await ensurePrincipalChatAccess(session, params.chatId);
+    if (session.kind === 'guest') return { ok: true };
 
     const latest = await prisma.message.findFirst({
       where: { chatId: params.chatId },
@@ -268,9 +273,9 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
   });
 
   app.post('/chats/:chatId/typing/start', async (request) => {
-    const session = await requireSession(request);
+    const session = await requirePrincipal(request);
     const params = chatIdParamsSchema.parse(request.params);
-    await ensureChatMember(session.user.id, params.chatId);
+    await ensurePrincipalChatAccess(session, params.chatId);
     await valkey.sadd(`typing:${params.chatId}`, session.user.id);
 
     io.to(`chat:${params.chatId}`).emit('typing:update', {
@@ -282,9 +287,9 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
   });
 
   app.post('/chats/:chatId/typing/stop', async (request) => {
-    const session = await requireSession(request);
+    const session = await requirePrincipal(request);
     const params = chatIdParamsSchema.parse(request.params);
-    await ensureChatMember(session.user.id, params.chatId);
+    await ensurePrincipalChatAccess(session, params.chatId);
     await valkey.srem(`typing:${params.chatId}`, session.user.id);
 
     io.to(`chat:${params.chatId}`).emit('typing:update', {
@@ -465,10 +470,10 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
   });
 
   app.get('/chats/:chatId/messages', async (request) => {
-    const session = await requireSession(request);
+    const session = await requirePrincipal(request);
     const params = chatIdParamsSchema.parse(request.params);
     const query = paginationQuerySchema.parse(request.query);
-    await ensureChatMember(session.user.id, params.chatId);
+    await ensurePrincipalChatAccess(session, params.chatId);
 
     const messages = await prisma.message.findMany({
       where: { chatId: params.chatId },
@@ -491,10 +496,10 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     '/chats/:chatId/messages',
     { config: { rateLimit: { max: 30, timeWindow: '1 minute' } } },
     async (request) => {
-      const session = await requireSession(request);
       const params = chatIdParamsSchema.parse(request.params);
       const body = messageTextSchema.parse(request.body);
-      const message = await createTextMessage(params.chatId, session.user.id, body.text);
+      const principal = await requirePrincipal(request);
+      const message = await createTextMessage(params.chatId, principal, body.text);
 
       io.to(`chat:${params.chatId}`).emit('message:new', message);
       await invalidateChatMembers(params.chatId);

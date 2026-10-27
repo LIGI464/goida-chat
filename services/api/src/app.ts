@@ -16,6 +16,10 @@ import { registerChatRoutes } from './routes/chats.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerVoiceRoutes } from './routes/voice.js';
 import { registerInviteRoutes } from './routes/invites.js';
+import { registerGuestRoutes } from './routes/guest.js';
+import { getAuthorizationPrincipal } from './lib/principal.js';
+import { consumeGuestRateLimit } from './services/guest-rate-limit.js';
+import { registerGuestVoiceExpiry } from './services/guest-voice.js';
 
 const appOrigin = new URL(env.APP_URL).origin;
 const devOrigins = new Set(['localhost', '127.0.0.1']);
@@ -50,6 +54,11 @@ export async function buildApp() {
   });
   await app.register(cookie, { secret: env.COOKIE_SECRET });
   await app.register(rateLimit, { max: 100, timeWindow: '1 minute' });
+  app.addHook('preHandler', async (request) => {
+    if (!request.headers.cookie?.includes('goida-guest-session=')) return;
+    const principal = await getAuthorizationPrincipal(request.headers);
+    if (principal?.kind === 'guest') await consumeGuestRateLimit(`http:${principal.id}`, 60);
+  });
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof ZodError) {
@@ -94,11 +103,13 @@ export async function buildApp() {
 
   app.get('/health', async () => ({ status: 'ok', service: 'api' }));
   await registerAuthRoutes(app);
+  await registerGuestRoutes(app, io);
   await registerUserRoutes(app, io);
   await registerChatRoutes(app, io);
   await registerVoiceRoutes(app);
   await registerInviteRoutes(app, io);
   registerRealtime(io, app.log);
+  registerGuestVoiceExpiry(app);
 
   app.addHook('onClose', async () => {
     io.close();

@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma.js';
 import { notFound } from '../lib/http.js';
 import { publicUser } from '../lib/session.js';
+import { ensurePrincipalChatAccess, type AuthorizationPrincipal } from '../lib/principal.js';
+import { consumeGuestRateLimit } from './guest-rate-limit.js';
 
 export const publicUserSelect = {
   id: true,
@@ -20,6 +22,7 @@ export const messageSelect = {
   createdAt: true,
   editedAt: true,
   user: { select: publicUserSelect },
+  guestSession: true,
 } satisfies Prisma.MessageSelect;
 
 export const chatInclude = {
@@ -33,6 +36,9 @@ export const chatInclude = {
     select: messageSelect,
   },
   voiceRoom: true,
+  guestSessions: { select: {
+    id: true, guestId: true, displayName: true, createdAt: true, expiresAt: true,
+  } },
 } satisfies Prisma.ChatInclude;
 
 export type ChatWithDetails = Prisma.ChatGetPayload<{ include: typeof chatInclude }>;
@@ -66,23 +72,31 @@ export async function ensureVoiceRoom(chatId: string) {
 }
 
 export function serializeMessage(message: MessageWithUser) {
+  const user = message.user ? publicUser(message.user) : message.guestSession ? {
+    id: message.guestSession.guestId, name: message.guestSession.displayName,
+    username: null, displayUsername: null, image: null,
+  } : null;
+  if (!user) throw new Error('Message author is missing');
   return {
     id: message.id,
     chatId: message.chatId,
-    userId: message.userId,
+    userId: user.id,
     text: message.text,
     createdAt: message.createdAt,
     editedAt: message.editedAt,
-    user: publicUser(message.user),
+    user,
   };
 }
 
 export function serializeChat(chat: ChatWithDetails, currentUserId: string) {
-  const members = chat.members.map((member) => ({
+  const members = [...chat.members.map((member) => ({
     id: member.id,
     joinedAt: member.joinedAt,
     user: publicUser(member.user),
-  }));
+  })), ...chat.guestSessions.filter((guest) => guest.expiresAt > new Date()).map((guest) => ({
+    id: guest.id, joinedAt: guest.createdAt,
+    user: { id: guest.guestId, name: guest.displayName, username: null, displayUsername: null, image: null },
+  }))];
   const directPeer =
     chat.type === 'direct' ? members.find((member) => member.user.id !== currentUserId) : null;
   const displayTitle =
@@ -117,14 +131,18 @@ export async function loadChatForUser(chatId: string, userId: string) {
   return serializeChat(chat, userId);
 }
 
-export async function createTextMessage(chatId: string, userId: string, text: string) {
-  await ensureChatMember(userId, chatId);
+export async function createTextMessage(chatId: string, actor: string | AuthorizationPrincipal, text: string) {
+  const userId = typeof actor === 'string' ? actor : actor.id;
+  if (typeof actor === 'string') await ensureChatMember(userId, chatId);
+  else await ensurePrincipalChatAccess(actor, chatId);
+  const guest = typeof actor !== 'string' && actor.kind === 'guest' ? actor : null;
+  if (guest) await consumeGuestRateLimit(`message:${guest.id}`, 10);
   const message = await prisma.$transaction(async (tx) => {
     const created = await tx.message.create({
-      data: { chatId, userId, text },
+      data: { chatId, text, ...(guest ? { guestSessionId: guest.session.id } : { userId }) },
       select: messageSelect,
     });
-    await tx.chatMember.update({
+    if (!guest) await tx.chatMember.update({
       where: { chatId_userId: { chatId, userId } },
       data: { lastReadMessageId: created.id },
     });
