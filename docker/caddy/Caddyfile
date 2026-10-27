@@ -24,6 +24,12 @@
 	handle /chats/* {
 		reverse_proxy backend:3000
 	}
+	handle /chats {
+		reverse_proxy backend:3000
+	}
+	handle /invites/* {
+		reverse_proxy backend:3000
+	}
 
 	handle /health {
 		reverse_proxy backend:3000

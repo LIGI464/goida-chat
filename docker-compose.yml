@@ -6,6 +6,7 @@ services:
       context: .
       dockerfile: apps/web/Dockerfile
       args:
+        RELEASE_SHA: ${RELEASE_SHA:-development}
         VITE_API_URL: ${API_URL:-http://localhost}
         VITE_LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit.localhost}
     restart: unless-stopped
@@ -20,6 +21,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: ${NODE_ENV:-development}
+      RELEASE_SHA: ${RELEASE_SHA:-development}
       HOST: 0.0.0.0
       PORT: 3000
       APP_URL: ${APP_URL:-http://localhost}
@@ -31,6 +33,9 @@ services:
       LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit.localhost}
       LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-devkey}
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-change_me_livekit_secret_at_least_32_chars}
+      ATTACHMENTS_STORAGE_ROOT: /var/lib/goida/attachments
+    volumes:
+      - attachments_data:/var/lib/goida/attachments
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,3 +125,4 @@ volumes:
   valkey_data:
   caddy_data:
   caddy_config:
+  attachments_data:

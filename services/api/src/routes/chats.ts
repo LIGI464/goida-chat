@@ -25,7 +25,12 @@ import {
   serializeChat,
   serializeMessage,
 } from '../services/chat.js';
-import { getOnlineUserIds, getTypingUsers, removeTypingPresence } from '../services/presence.js';
+import {
+  addTypingPresence,
+  getOnlineUserIds,
+  getTypingUsers,
+  removeTypingPresence,
+} from '../services/presence.js';
 import { getVoicePresence, removeVoicePresence } from '../services/voice-presence.js';
 
 async function unreadCount(chatId: string, userId: string) {
@@ -39,7 +44,7 @@ async function unreadCount(chatId: string, userId: string) {
 
   const latest = await prisma.message.findFirst({
     where: { chatId },
-    orderBy: { createdAt: 'desc' },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     select: { id: true, createdAt: true },
   });
 
@@ -65,7 +70,14 @@ async function unreadCount(chatId: string, userId: string) {
     where: {
       chatId,
       ...otherAuthor,
-      createdAt: { gt: read.createdAt },
+      AND: [
+        {
+          OR: [
+            { createdAt: { gt: read.createdAt } },
+            { createdAt: read.createdAt, id: { gt: membership.lastReadMessageId } },
+          ],
+        },
+      ],
     },
   });
 }
@@ -113,9 +125,10 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
   app.get('/chats', async (request) => {
     const session = await requirePrincipal(request);
     const chats = await prisma.chat.findMany({
-      where: session.kind === 'guest'
-        ? { id: session.chatId }
-        : { members: { some: { userId: session.user.id } } },
+      where:
+        session.kind === 'guest'
+          ? { id: session.chatId }
+          : { members: { some: { userId: session.user.id } } },
       orderBy: { updatedAt: 'desc' },
       include: chatInclude,
     });
@@ -276,7 +289,7 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     const session = await requirePrincipal(request);
     const params = chatIdParamsSchema.parse(request.params);
     await ensurePrincipalChatAccess(session, params.chatId);
-    await valkey.sadd(`typing:${params.chatId}`, session.user.id);
+    await addTypingPresence(params.chatId, session.user.id);
 
     io.to(`chat:${params.chatId}`).emit('typing:update', {
       chatId: params.chatId,
@@ -290,7 +303,7 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     const session = await requirePrincipal(request);
     const params = chatIdParamsSchema.parse(request.params);
     await ensurePrincipalChatAccess(session, params.chatId);
-    await valkey.srem(`typing:${params.chatId}`, session.user.id);
+    await removeTypingPresence(params.chatId, session.user.id);
 
     io.to(`chat:${params.chatId}`).emit('typing:update', {
       chatId: params.chatId,
@@ -396,7 +409,10 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
     await io.in(`user:${session.user.id}`).socketsLeave(`chat:${params.chatId}`);
 
     if (shouldDeleteChat) {
-      await valkey.del(`presence:chat:${params.chatId}:typing`, `voice:chat:${params.chatId}:users`);
+      await valkey.del(
+        `presence:chat:${params.chatId}:typing`,
+        `voice:chat:${params.chatId}:users`,
+      );
     }
 
     invalidateChatLists(previousMemberIds);
@@ -477,7 +493,7 @@ export async function registerChatRoutes(app: FastifyInstance, io: SocketServer)
 
     const messages = await prisma.message.findMany({
       where: { chatId: params.chatId },
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: query.limit + 1,
       ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
       select: messageSelect,

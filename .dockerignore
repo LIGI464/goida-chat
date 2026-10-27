@@ -10,4 +10,11 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+.codex/
+.codex-worktrees/
+.codex-logs/
+.tmp/
+EZPowerPoint/
+backups/
+**/*.user-backup
 

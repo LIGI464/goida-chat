@@ -39,7 +39,17 @@ function isAllowedOrigin(origin?: string | null) {
 
 export async function buildApp() {
   const app = Fastify({
-    logger: true,
+    logger: {
+      redact: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
+      serializers: {
+        req(request) {
+          return {
+            method: request.method,
+            url: (request.url?.split('?')[0] ?? '').replace(/\/invites\/[^/]+/u, '/invites/[redacted]'),
+          };
+        },
+      },
+    },
     trustProxy: env.NODE_ENV === 'production',
     bodyLimit: 64 * 1024,
   });
@@ -102,18 +112,19 @@ export async function buildApp() {
     },
   });
 
-  app.get('/health', async () => ({ status: 'ok', service: 'api' }));
-  await registerAuthRoutes(app);
+  app.get('/health', async () => ({ status: 'ok', service: 'api', revision: env.RELEASE_SHA }));
+  await registerAuthRoutes(app, io);
   await registerGuestRoutes(app, io);
   await registerUserRoutes(app, io);
   await registerChatRoutes(app, io);
   await registerVoiceRoutes(app);
   await registerInviteRoutes(app, io);
   await registerAttachmentRoutes(app, io);
-  registerRealtime(io, app.log);
+  const stopRealtime = registerRealtime(io, app.log);
   registerGuestVoiceExpiry(app);
 
   app.addHook('onClose', async () => {
+    await stopRealtime();
     io.close();
     valkey.disconnect();
     await prisma.$disconnect();

@@ -834,7 +834,8 @@ function ChatSidebar({
       const url = `${window.location.origin}/invite/${token}`;
       setInviteLink(url);
       try {
-        await navigator.clipboard?.writeText(url);
+        if (!navigator.clipboard) throw new Error('Clipboard unavailable');
+        await navigator.clipboard.writeText(url);
         setInviteStatus('Ссылка создана и скопирована.');
       } catch {
         setInviteStatus('Ссылка создана. Скопируй её из поля ниже.');
@@ -1207,8 +1208,11 @@ function ChatSidebar({
                       aria-label="Скопировать invite-ссылку"
                       className={`${brandGhostButtonClassName} h-10 shrink-0 px-3 text-xs`}
                       onClick={() => {
-                        void navigator.clipboard?.writeText(inviteLink);
-                        setInviteStatus('Ссылка скопирована.');
+                        if (!navigator.clipboard) { setInviteStatus('Скопируй ссылку из поля.'); return; }
+                        void navigator.clipboard.writeText(inviteLink).then(
+                          () => setInviteStatus('Ссылка скопирована.'),
+                          () => setInviteStatus('Скопируй ссылку из поля.'),
+                        );
                       }}
                       type="button"
                     >
@@ -1340,6 +1344,7 @@ function ChatSidebar({
 
       <div className="brand-surface mt-3 shrink-0 p-3">
         <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Profile</p>
+        <Link className="brand-link block py-2 text-xs" to="/audio/noise-lab">Диагностика микрофона</Link>
         <button
           aria-label={`Открыть профиль @${currentUser.username ?? currentUser.name}`}
           className="brand-surface-muted mt-2 w-full px-3 py-3 text-left transition-colors duration-150 hover:border-[var(--border-strong)]"
@@ -2795,7 +2800,7 @@ function ChatLayout() {
   return (
     <>
       <main
-        className={`grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] ${sidebarCollapsed ? 'md:grid-cols-[84px_1fr]' : 'md:grid-cols-[352px_1fr]'}`}
+        className={`grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] ${sidebarCollapsed && !currentUser.isGuest ? 'md:grid-cols-[84px_1fr]' : 'md:grid-cols-[352px_1fr]'}`}
       >
         <div className="hidden min-h-0 overflow-hidden md:block">
           <ChatSidebar

@@ -5,13 +5,26 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   plugins: [
+    {
+      name: 'release-version',
+      generateBundle() {
+        this.emitFile({
+          type: 'asset',
+          fileName: 'version.json',
+          source: JSON.stringify({ revision: process.env.VITE_RELEASE_SHA ?? 'development' }),
+        });
+      },
+    },
     react(),
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
       workbox: {
         // API downloads opened in a tab must reach the server, not the SPA shell.
-        navigateFallbackDenylist: [/^\/chats\//],
+        navigateFallbackDenylist: [
+          /^\/(?:chats|invites|auth|users|socket\.io)(?:\/|$)/,
+          /^\/health$/,
+        ],
       },
       includeAssets: [
         'favicon.ico',

@@ -5,6 +5,7 @@ import { ATTACHMENT_TTL_MS } from '@goida-chat/shared';
 import { badRequest, notFound } from '../lib/http.js';
 import { messageSelect, serializeMessage } from './chat.js';
 import type { StorageAdapter } from '../storage/adapter.js';
+import type { AuthorizationPrincipal } from '../lib/principal.js';
 
 export const UPLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 export type StoredAttachment = Attachment & { message: { chatId: string } | null };
@@ -26,13 +27,31 @@ export function attachmentRepository(db: PrismaClient, storage: StorageAdapter) 
       userId: string,
       text: string,
       size: number,
+      actor?: AuthorizationPrincipal,
     ) {
       const message = await db.$transaction(async (tx) => {
-        const member = await tx.chatMember.findUnique({
-          where: { chatId_userId: { chatId, userId } },
+        const guest = actor?.kind === 'guest' ? actor : null;
+        if (guest) {
+          // Lock the session with a conditional write so expiry/sign-out racing
+          // a slow upload cannot publish using a stale principal.
+          const active = await tx.guestSession.updateMany({
+            where: { id: guest.session.id, chatId, expiresAt: { gt: new Date() } },
+            data: { expiresAt: guest.session.expiresAt },
+          });
+          if (active.count !== 1) throw notFound('Chat not found');
+        } else {
+          const member = await tx.chatMember.findUnique({
+            where: { chatId_userId: { chatId, userId } },
+          });
+          if (!member) throw notFound('Chat not found');
+        }
+        const created = await tx.message.create({
+          data: {
+            chatId,
+            text,
+            ...(guest ? { guestSessionId: guest.session.id } : { userId }),
+          },
         });
-        if (!member) throw notFound('Chat not found');
-        const created = await tx.message.create({ data: { chatId, userId, text } });
         const attached = await tx.attachment.updateMany({
           where: {
             id: attachment.id,
@@ -45,10 +64,11 @@ export function attachmentRepository(db: PrismaClient, storage: StorageAdapter) 
         if (attached.count !== 1) throw badRequest('Время загрузки истекло. Повтори отправку');
         // This write also ensures a concurrently removed membership cannot
         // publish a message successfully after leaving the chat.
-        await tx.chatMember.update({
-          where: { chatId_userId: { chatId, userId } },
-          data: { lastReadMessageId: created.id },
-        });
+        if (!guest)
+          await tx.chatMember.update({
+            where: { chatId_userId: { chatId, userId } },
+            data: { lastReadMessageId: created.id },
+          });
         await tx.chat.update({ where: { id: chatId }, data: { updatedAt: new Date() } });
         return tx.message.findUniqueOrThrow({ where: { id: created.id }, select: messageSelect });
       });

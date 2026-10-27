@@ -11,7 +11,11 @@ import { z } from 'zod';
 import { env } from '../config.js';
 import { badRequest, forbidden, HttpError, notFound } from '../lib/http.js';
 import { prisma } from '../lib/prisma.js';
-import { requireSession } from '../lib/session.js';
+import {
+  requirePrincipal,
+  ensurePrincipalChatAccess,
+  type AuthorizationPrincipal,
+} from '../lib/principal.js';
 import { valkey } from '../lib/valkey.js';
 import {
   attachmentRepository,
@@ -19,7 +23,6 @@ import {
   UPLOAD_TIMEOUT_MS,
   type AttachmentRepository,
 } from '../services/attachments.js';
-import { ensureChatMember } from '../services/chat.js';
 import { FilesystemStorageAdapter, type StorageAdapter } from '../storage/adapter.js';
 import { createAttachmentSigner } from '../storage/signed.js';
 import { validateFileMetadata } from '../storage/validation.js';
@@ -34,7 +37,8 @@ const contentQuery = z.object({
 
 export type AttachmentRouteDependencies = {
   authenticate(request: FastifyRequest): Promise<string>;
-  ensureMember(userId: string, chatId: string): Promise<unknown>;
+  ensureMember(userId: string, chatId: string, request: FastifyRequest): Promise<unknown>;
+  actor?(request: FastifyRequest): AuthorizationPrincipal | undefined;
   consumeQuota(userId: string): Promise<void>;
   repository: AttachmentRepository;
   storage: StorageAdapter;
@@ -60,7 +64,7 @@ export async function attachmentRoutes(app: FastifyInstance, deps: AttachmentRou
     reply.header('Cache-Control', 'private, no-store').header('Referrer-Policy', 'no-referrer');
     const userId = await deps.authenticate(request);
     const { chatId } = chatIdParamsSchema.parse(request.params);
-    await deps.ensureMember(userId, chatId);
+    await deps.ensureMember(userId, chatId, request);
     users.set(request, userId);
   });
 
@@ -136,6 +140,7 @@ export async function attachmentRoutes(app: FastifyInstance, deps: AttachmentRou
           users.get(request)!,
           text,
           size,
+          deps.actor?.(request),
         );
         committed = true;
         // Notification failure must never delete a successfully committed file.
@@ -201,7 +206,13 @@ export async function attachmentRoutes(app: FastifyInstance, deps: AttachmentRou
     // Long downloads are cut off when the actual retention period ends.
     const expiryTimer = setTimeout(
       () => source.destroy(),
-      Math.min(attachment.expiresAt.getTime() - Date.now(), 2_147_483_647),
+      Math.max(
+        0,
+        Math.min(
+          attachment.expiresAt.getTime(),
+          deps.actor?.(request)?.session.expiresAt.getTime() ?? Infinity,
+        ) - Date.now(),
+      ),
     );
     expiryTimer.unref();
     source.once('close', () => clearTimeout(expiryTimer));
@@ -213,12 +224,20 @@ export async function attachmentRoutes(app: FastifyInstance, deps: AttachmentRou
 export async function registerAttachmentRoutes(app: FastifyInstance, io: SocketServer) {
   const storage = new FilesystemStorageAdapter(env.ATTACHMENTS_STORAGE_ROOT);
   const repository = attachmentRepository(prisma, storage);
+  const principals = new WeakMap<FastifyRequest, AuthorizationPrincipal>();
   await app.register(attachmentRoutes, {
     storage,
     repository,
     signer: createAttachmentSigner(env.BETTER_AUTH_SECRET),
-    authenticate: async (request) => (await requireSession(request)).user.id,
-    ensureMember: ensureChatMember,
+    authenticate: async (request: FastifyRequest) => {
+      const principal = await requirePrincipal(request);
+      principals.set(request, principal);
+      return principal.id;
+    },
+    ensureMember: async (_id: string, chatId: string, request: FastifyRequest) => {
+      await ensurePrincipalChatAccess(principals.get(request)!, chatId);
+    },
+    actor: (request: FastifyRequest) => principals.get(request),
     consumeQuota: async (userId) => {
       const count = await valkey.eval(
         "local n = redis.call('INCR', KEYS[1]); if n == 1 then redis.call('EXPIRE', KEYS[1], 600) end; return n",

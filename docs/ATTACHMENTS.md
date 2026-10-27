@@ -53,15 +53,14 @@ interrupted uploads recoverable by cleanup after a crash.
    to the API process working directory. Files use generated keys, directory
    mode 0700 and file mode 0600. The adapter interface allows replacement with
    an object store without changing the upload or authorization contract.
-3. For Docker, review and apply `integration-patches/attachments-storage.patch`:
-   `git apply --check integration-patches/attachments-storage.patch`, then
-   `git apply integration-patches/attachments-storage.patch`. This mounts a
-   dedicated named volume; the main Compose file is intentionally unchanged.
+3. Docker Compose mounts `attachments_data` at `/var/lib/goida/attachments`.
+   The filesystem adapter streams directly into this private persistent volume.
    Existing Caddy `/chats/*` routing already covers uploads and downloads.
 4. All API replicas must share the same storage directory and signing secret.
    Do not scale filesystem-backed replicas across independent disks. Configure
    any external proxy to stream requests and allow a 100 MiB file plus multipart
-   overhead. Monitor disk capacity and cleanup error logs. Do not publicly serve
+   overhead. Caddy streams without buffering; the shared 104,857,600-byte limit
+   applies to the file payload on client and server. Monitor disk capacity and cleanup error logs. Do not publicly serve
    the volume. Backup retention must be managed separately from live file expiry.
 
 Verification: `npm run test:attachments -w @goida-chat/api`, `npm run lint`,

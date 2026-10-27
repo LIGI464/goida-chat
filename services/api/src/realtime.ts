@@ -2,7 +2,13 @@ import type { FastifyBaseLogger } from 'fastify';
 import type { Server as SocketServer, Socket } from 'socket.io';
 import { messageInputSchema } from '@goida-chat/shared';
 
-import { getAuthorizationPrincipal, ensurePrincipalChatAccess, assertActiveGuest, assertGuestScope, type AuthorizationPrincipal } from './lib/principal.js';
+import {
+  getAuthorizationPrincipal,
+  ensurePrincipalChatAccess,
+  assertActiveGuest,
+  assertGuestScope,
+  type AuthorizationPrincipal,
+} from './lib/principal.js';
 import { consumeGuestRateLimit } from './services/guest-rate-limit.js';
 import { removeExpiredGuestVoice } from './services/guest-voice.js';
 import { prisma } from './lib/prisma.js';
@@ -94,6 +100,7 @@ async function invalidateChatLists(io: SocketServer, chatId: string) {
 }
 
 export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
+  const disconnectTasks = new Set<Promise<void>>();
   io.use(async (socket, next) => {
     try {
       const principal = await getAuthorizationPrincipal(socket.request.headers);
@@ -120,11 +127,21 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
     void socket.join(`user:${authed.data.userId}`);
 
     const guest = authed.data.principal.kind === 'guest' ? authed.data.principal : null;
-    const expirationTimer = guest ? setTimeout(() => {
-      socket.emit('session:expired');
-      socket.disconnect(true);
-      void removeExpiredGuestVoice(guest).catch((error) => log.warn({ error }, 'guest voice expiry cleanup failed'));
-    }, Math.max(0, guest.session.expiresAt.getTime() - Date.now())) : null;
+    const expirationTimer = guest
+      ? setTimeout(
+          () => {
+            socket.emit('session:expired');
+            socket.disconnect(true);
+            void invalidateChatLists(io, guest.chatId).catch((error) =>
+              log.warn({ error }, 'guest list expiry update failed'),
+            );
+            void removeExpiredGuestVoice(guest).catch((error) =>
+              log.warn({ error }, 'guest voice expiry cleanup failed'),
+            );
+          },
+          Math.max(0, guest.session.expiresAt.getTime() - Date.now()),
+        )
+      : null;
     expirationTimer?.unref();
     socket.use(async (packet, next) => {
       if (!guest) return next();
@@ -148,7 +165,7 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
       if (becameOnline && !guest) {
         await emitPresenceToRelatedUsers(io, authed.data.userId, true);
       }
-    })();
+    })().catch((error) => log.warn({ error }, 'socket online presence failed'));
 
     socket.on('chat:join', async (payload: { chatId?: string }, ack?: Ack) => {
       try {
@@ -246,24 +263,36 @@ export function registerRealtime(io: SocketServer, log: FastifyBaseLogger) {
       }
     });
 
-    socket.on('disconnect', async () => {
-      if (expirationTimer) clearTimeout(expirationTimer);
-      if (guest) {
-        void removeExpiredGuestVoice(guest).catch((error) => log.warn({ error }, 'guest voice cleanup failed'));
-      }
-      const becameOffline = await removeOnlineSocket(authed.data.userId, socket.id);
-      if (becameOffline && !guest) {
-        await emitPresenceToRelatedUsers(io, authed.data.userId, false);
-      }
+    socket.on('disconnect', () => {
+      const cleanup = (async () => {
+        if (expirationTimer) clearTimeout(expirationTimer);
+        if (guest) {
+          await removeExpiredGuestVoice(guest).catch((error) =>
+            log.warn({ error }, 'guest voice cleanup failed'),
+          );
+        }
+        const becameOffline = await removeOnlineSocket(authed.data.userId, socket.id);
+        if (becameOffline && !guest) {
+          await emitPresenceToRelatedUsers(io, authed.data.userId, false);
+        }
 
-      await Promise.all(
-        [...authed.data.voiceChats, ...authed.data.typingChats].map(async (chatId) => {
-          await removeVoicePresence(chatId, authed.data.userId, socket.id);
-          await removeTypingPresence(chatId, authed.data.userId);
-          await emitVoicePresence(io, chatId);
-          await emitTypingPresence(io, chatId);
-        }),
-      );
+        await Promise.all(
+          [...authed.data.voiceChats, ...authed.data.typingChats].map(async (chatId) => {
+            await removeVoicePresence(chatId, authed.data.userId, socket.id);
+            await removeTypingPresence(chatId, authed.data.userId);
+            await emitVoicePresence(io, chatId);
+            await emitTypingPresence(io, chatId);
+          }),
+        );
+      })();
+      disconnectTasks.add(cleanup);
+      void cleanup
+        .catch((error) => log.warn({ error }, 'socket disconnect cleanup failed'))
+        .finally(() => disconnectTasks.delete(cleanup));
     });
   });
+  return async () => {
+    io.disconnectSockets(true);
+    await Promise.allSettled([...disconnectTasks]);
+  };
 }
