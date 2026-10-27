@@ -10,6 +10,7 @@ import {
 } from '@tanstack/react-query';
 import {
   Suspense,
+  lazy,
   type FormEvent,
   type ReactNode,
   useEffect,
@@ -36,6 +37,12 @@ import { usePersistentPeerVolumes } from './features/voice/audio/usePersistentPe
 import { api, type Chat, type Message, type PublicUser, type VoiceToken } from './lib/api';
 import { authClient } from './lib/auth-client';
 import { createChatSocket, type ChatSocket } from './lib/socket';
+
+const NoiseSuppressionLab = lazy(() =>
+  import('./components/voice/NoiseSuppressionLab').then((module) => ({
+    default: module.NoiseSuppressionLab,
+  })),
+);
 
 const TERRARIA_ROOM_NAMES = [
   'Amber Hollow',
@@ -2455,6 +2462,16 @@ export function App() {
           </ProtectedRoute>
         }
         path="/invite/:token"
+      />
+      <Route
+        element={
+          <ProtectedRoute>
+            <Suspense fallback={<LoadingScreen />}>
+              <NoiseSuppressionLab />
+            </Suspense>
+          </ProtectedRoute>
+        }
+        path="/audio/noise-lab"
       />
       <Route element={<Navigate replace to="/app" />} path="*" />
     </Routes>
