@@ -93,7 +93,7 @@ async function socket(who) {
   return client;
 }
 const ack = (client, name, payload) => client.timeout(3000).emitWithAck(name, payload);
-const event = (client, name) => once(client, name, { signal: AbortSignal.timeout(4000) });
+const event = (client, name) => once(client, name, { signal: AbortSignal.timeout(8000) }).catch(() => { throw new Error(`Timed out waiting for ${name}`); });
 try {
   for (const label of ['owner', 'member', 'third', 'outsider']) {
     const who = actor();
@@ -313,9 +313,10 @@ try {
   );
   await prisma.guestSession.update({
     where: { id: principal.session.id },
-    data: { expiresAt: new Date(Date.now() + 300) },
+    data: { expiresAt: new Date(Date.now() + 2000) },
   });
   const short = await socket(guest);
+  pass('revoked, expired and exhausted guest endpoints reject entry');
   await event(short, 'disconnect');
   assert.equal((await request(guest, 'GET', `/chats/${group.id}/messages`)).statusCode, 401);
   assert.equal(

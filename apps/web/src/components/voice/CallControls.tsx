@@ -205,6 +205,7 @@ export function CallControls({
       </button>
 
       <button
+        aria-label="Выйти из звонка"
         className={`${controlClassName} ${tone(false, true)}`}
         onClick={leaveVoice}
         type="button"
