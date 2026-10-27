@@ -12,13 +12,22 @@ import {
   Suspense,
   lazy,
   type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
-import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
+import {
+  Link,
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useParams,
+} from 'react-router-dom';
 import { z } from 'zod';
 
 import { GoidaLogo } from './components/brand/GoidaLogo';
@@ -88,6 +97,27 @@ const brandDangerNoticeClassName =
   'rounded-2xl border border-[rgba(255,117,130,0.22)] bg-[rgba(84,15,28,0.34)] px-4 py-3 text-sm text-[#ffd8dd]';
 const brandSuccessNoticeClassName =
   'rounded-2xl border border-[rgba(124,226,188,0.2)] bg-[rgba(14,58,44,0.34)] px-4 py-3 text-sm text-[#c8f7e3]';
+
+const SIDEBAR_RAIL_STORAGE_KEY = 'goida.sidebar.rail';
+const SIDEBAR_SEARCH_STORAGE_KEY = 'goida.sidebar.search-open';
+const SIDEBAR_CREATE_STORAGE_KEY = 'goida.sidebar.create-open';
+
+function readStoredBoolean(key: string, fallback: boolean) {
+  try {
+    const value = window.localStorage.getItem(key);
+    return value === null ? fallback : value === 'true';
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredBoolean(key: string, value: boolean) {
+  try {
+    window.localStorage.setItem(key, String(value));
+  } catch {
+    // localStorage can be unavailable in private browsing or restricted embeds.
+  }
+}
 
 function errorMessage(error: unknown) {
   if (error && typeof error === 'object' && 'message' in error) {
@@ -713,6 +743,7 @@ function ProfileDialog({
 }
 
 function ChatSidebar({
+  collapsed,
   chats,
   currentUser,
   selectedChatId,
@@ -721,7 +752,9 @@ function ChatSidebar({
   onOpenProfile,
   onSelect,
   onSignOut,
+  onToggleCollapsed,
 }: {
+  collapsed: boolean;
   chats: Chat[];
   currentUser: CurrentUser;
   selectedChatId: string | null;
@@ -730,11 +763,21 @@ function ChatSidebar({
   onOpenProfile: () => void;
   onSelect: (chatId: string | null) => void;
   onSignOut: () => void;
+  onToggleCollapsed: () => void;
 }) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const [searchOpen, setSearchOpen] = useState(() =>
+    readStoredBoolean(SIDEBAR_SEARCH_STORAGE_KEY, true),
+  );
+  const [createOpen, setCreateOpen] = useState(() =>
+    readStoredBoolean(SIDEBAR_CREATE_STORAGE_KEY, true),
+  );
   const [groupTitle, setGroupTitle] = useState(() => randomRoomTitle());
   const [groupMembers, setGroupMembers] = useState('');
+  const [createdGroupId, setCreatedGroupId] = useState<string | null>(null);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviteStatus, setInviteStatus] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const normalizedSearch = normalizeUserSearch(search);
 
@@ -761,7 +804,25 @@ function ChatSidebar({
       onSelect(chat.id);
       setGroupTitle(randomRoomTitle());
       setGroupMembers('');
+      setCreatedGroupId(chat.id);
+      setInviteLink(null);
+      setInviteStatus(null);
     },
+  });
+
+  const inviteMutation = useMutation({
+    mutationFn: (chatId: string) => api.createInvite(chatId),
+    onSuccess: async ({ token }) => {
+      const url = `${window.location.origin}/invite/${token}`;
+      setInviteLink(url);
+      try {
+        await navigator.clipboard?.writeText(url);
+        setInviteStatus('Ссылка создана и скопирована.');
+      } catch {
+        setInviteStatus('Ссылка создана. Скопируй её из поля ниже.');
+      }
+    },
+    onError: (caught) => setInviteStatus(errorMessage(caught)),
   });
 
   const deleteChatMutation = useMutation({
@@ -841,8 +902,117 @@ function ChatSidebar({
     };
   }, [queryClient, socket]);
 
+  useEffect(() => {
+    writeStoredBoolean(SIDEBAR_SEARCH_STORAGE_KEY, searchOpen);
+  }, [searchOpen]);
+
+  useEffect(() => {
+    writeStoredBoolean(SIDEBAR_CREATE_STORAGE_KEY, createOpen);
+  }, [createOpen]);
+
+  function handleChatListKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const target = event.target as HTMLElement;
+    const currentIndex = Number(target.dataset.chatIndex ?? -1);
+    if (currentIndex < 0 || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+
+    event.preventDefault();
+    const nextIndex =
+      event.key === 'Home'
+        ? 0
+        : event.key === 'End'
+          ? chats.length - 1
+          : (currentIndex + (event.key === 'ArrowDown' ? 1 : -1) + chats.length) % chats.length;
+    const next = event.currentTarget.querySelector<HTMLElement>(`[data-chat-index="${nextIndex}"]`);
+    next?.focus();
+  }
+
+  if (collapsed) {
+    return (
+      <aside
+        aria-label="Свернутая панель навигации"
+        className="flex h-full min-h-0 flex-col items-center overflow-hidden border-r brand-divider bg-[linear-gradient(180deg,rgba(14,15,18,0.98),rgba(8,9,11,0.98))] px-2 py-3"
+      >
+        <div className="flex w-full flex-col items-center gap-3">
+          <GoidaLogo
+            alt="Goida"
+            className="block w-12"
+            imageClassName="h-auto w-full object-contain"
+            variant="mark"
+          />
+          <button
+            aria-label="Развернуть панель навигации"
+            className={`${brandSecondaryButtonCompactClassName} h-10 w-10 px-0 text-lg`}
+            onClick={onToggleCollapsed}
+            title="Развернуть панель"
+            type="button"
+          >
+            →
+          </button>
+          <div className="mt-2 flex w-full flex-col items-center gap-2 border-t brand-divider pt-3">
+            <button
+              aria-label="Открыть поиск пользователей"
+              className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-lg`}
+              onClick={() => {
+                setSearchOpen(true);
+                onToggleCollapsed();
+              }}
+              title="Поиск"
+              type="button"
+            >
+              ⌕
+            </button>
+            <button
+              aria-label="Открыть создание комнаты"
+              className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-lg`}
+              onClick={() => {
+                setCreateOpen(true);
+                onToggleCollapsed();
+              }}
+              title="Новая комната"
+              type="button"
+            >
+              +
+            </button>
+            <button
+              aria-label="Открыть профиль"
+              className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-lg`}
+              onClick={onOpenProfile}
+              title="Профиль"
+              type="button"
+            >
+              ◉
+            </button>
+          </div>
+        </div>
+        <div className="mt-auto flex w-full flex-col items-center gap-2">
+          <button
+            aria-label={`Профиль @${currentUser.username ?? currentUser.name}`}
+            className="brand-surface-muted grid h-10 w-10 place-items-center rounded-xl text-sm font-semibold text-[var(--text)]"
+            onClick={onOpenProfile}
+            title={`@${currentUser.username ?? currentUser.name}`}
+            type="button"
+          >
+            {(currentUser.username ?? currentUser.name).slice(0, 1).toUpperCase()}
+          </button>
+          <button
+            aria-label="Выйти"
+            className={`${brandGhostButtonClassName} h-10 w-10 px-0 text-xs`}
+            onClick={onSignOut}
+            title="Выйти"
+            type="button"
+          >
+            ↪
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="flex h-full min-h-0 flex-col overflow-hidden border-r brand-divider bg-[linear-gradient(180deg,rgba(14,15,18,0.98),rgba(8,9,11,0.98))] p-4">
+    <aside
+      aria-label="Навигация Goida Chat"
+      className="flex h-full min-h-0 flex-col overflow-hidden border-r brand-divider bg-[linear-gradient(180deg,rgba(14,15,18,0.98),rgba(8,9,11,0.98))] p-4"
+    >
       <div className="mb-4 brand-card min-h-[118px] px-4 pt-4 pb-3">
         <div className="flex h-full items-start justify-between gap-3">
           <div className="min-w-0 self-end pt-5">
@@ -852,92 +1022,196 @@ function ChatSidebar({
               variant="lockup"
             />
           </div>
-          <button
-            className={`${brandGhostButtonClassName} h-9 shrink-0 self-start whitespace-nowrap px-3`}
-            onClick={onSignOut}
-            type="button"
-          >
-            Выйти
-          </button>
+          <div className="flex shrink-0 items-center gap-1">
+            <button
+              aria-label="Свернуть панель навигации"
+              className={`${brandGhostButtonClassName} h-9 w-9 px-0 text-lg`}
+              onClick={onToggleCollapsed}
+              title="Свернуть панель"
+              type="button"
+            >
+              ←
+            </button>
+            <button
+              aria-label="Выйти"
+              className={`${brandGhostButtonClassName} h-9 shrink-0 whitespace-nowrap px-3`}
+              onClick={onSignOut}
+              type="button"
+            >
+              Выйти
+            </button>
+          </div>
         </div>
       </div>
 
-      <div className="brand-surface shrink-0 p-3">
-        <div className="mb-3 flex items-center justify-between gap-3">
+      <section className="brand-surface shrink-0 p-3" aria-labelledby="sidebar-search-heading">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Search</p>
-            <p className="mt-1 text-sm text-[var(--muted-strong)]">Поиск @username</p>
+            <p className="mt-1 text-sm text-[var(--muted-strong)]" id="sidebar-search-heading">
+              Личная комната
+            </p>
           </div>
-          <span className="brand-pill text-[10px]">чат</span>
+          <button
+            aria-controls="sidebar-search-panel"
+            aria-expanded={searchOpen}
+            aria-label={searchOpen ? 'Свернуть поиск' : 'Развернуть поиск'}
+            className={`${brandGhostButtonClassName} h-8 w-8 px-0 text-lg`}
+            onClick={() => setSearchOpen((value) => !value)}
+            type="button"
+          >
+            {searchOpen ? '−' : '+'}
+          </button>
         </div>
 
-        <input
-          className={brandInputCompactClassName}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Напиши ник"
-          value={search}
-        />
-
-        {normalizedSearch.length >= 3 && (
-          <div className="brand-surface-muted app-scrollbar mt-3 max-h-48 overflow-y-auto overflow-x-hidden p-2">
-            <UserSearchResults
-              actionLabel="Создать"
-              disabledUsername={null}
-              emptyLabel="Никого не нашёл"
-              isPending={userSearch.isPending}
-              onAction={(username) => directMutation.mutate(username)}
-              users={userSearch.data?.users ?? []}
+        {searchOpen && (
+          <div className="mt-3" id="sidebar-search-panel">
+            <input
+              aria-label="Поиск пользователя по имени"
+              className={brandInputCompactClassName}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Напиши @username"
+              value={search}
             />
-            {directMutation.error && (
-              <p className="p-2 text-xs text-[var(--danger)]">
-                {errorMessage(directMutation.error)}
-              </p>
+
+            {normalizedSearch.length >= 3 && (
+              <div className="brand-surface-muted app-scrollbar mt-3 max-h-48 overflow-y-auto overflow-x-hidden p-2">
+                <UserSearchResults
+                  actionLabel="Создать"
+                  disabledUsername={null}
+                  emptyLabel="Никого не нашёл"
+                  isPending={userSearch.isPending}
+                  onAction={(username) => directMutation.mutate(username)}
+                  users={userSearch.data?.users ?? []}
+                />
+                {directMutation.error && (
+                  <p className="p-2 text-xs text-[var(--danger)]">
+                    {errorMessage(directMutation.error)}
+                  </p>
+                )}
+              </div>
             )}
           </div>
         )}
-      </div>
+      </section>
 
-      <form className="brand-surface mt-3 shrink-0 p-3" onSubmit={createGroup}>
-        <div className="mb-3 flex items-center justify-between gap-2">
+      <section className="brand-surface mt-3 shrink-0 p-3" aria-labelledby="sidebar-create-heading">
+        <div className="flex items-center justify-between gap-2">
           <div>
             <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Create room</p>
-            <p className="mt-1 text-sm text-[var(--muted-strong)]">Новая комната</p>
+            <p className="mt-1 text-sm text-[var(--muted-strong)]" id="sidebar-create-heading">
+              Групповая комната
+            </p>
           </div>
           <button
-            className="brand-link text-xs"
-            onClick={() => setGroupTitle(randomRoomTitle())}
+            aria-controls="sidebar-create-panel"
+            aria-expanded={createOpen}
+            aria-label={createOpen ? 'Свернуть создание комнаты' : 'Развернуть создание комнаты'}
+            className={`${brandGhostButtonClassName} h-8 w-8 px-0 text-lg`}
+            onClick={() => setCreateOpen((value) => !value)}
             type="button"
           >
-            Random
+            {createOpen ? '−' : '+'}
           </button>
         </div>
 
-        <input
-          className={`${brandInputCompactClassName} mb-2`}
-          onChange={(event) => setGroupTitle(event.target.value)}
-          placeholder="Название комнаты"
-          value={groupTitle}
-        />
-        <input
-          className={`${brandInputCompactClassName} mb-3`}
-          onChange={(event) => setGroupMembers(event.target.value)}
-          placeholder="@user1, @user2"
-          value={groupMembers}
-        />
+        {createOpen && (
+          <form className="mt-3 grid gap-2" id="sidebar-create-panel" onSubmit={createGroup}>
+            <div className="flex items-center justify-end">
+              <button
+                aria-label="Сгенерировать случайное название комнаты"
+                className="brand-link text-xs"
+                onClick={() => setGroupTitle(randomRoomTitle())}
+                type="button"
+              >
+                Random
+              </button>
+            </div>
+            <input
+              aria-label="Название групповой комнаты"
+              className={brandInputCompactClassName}
+              onChange={(event) => setGroupTitle(event.target.value)}
+              placeholder="Название комнаты"
+              value={groupTitle}
+            />
+            <input
+              aria-label="Участники групповой комнаты"
+              className={brandInputCompactClassName}
+              onChange={(event) => setGroupMembers(event.target.value)}
+              placeholder="@user1, @user2"
+              value={groupMembers}
+            />
+            <button
+              aria-label="Создать групповую комнату"
+              className={`${brandPrimaryButtonCompactClassName} w-full`}
+              disabled={groupMutation.isPending}
+              type="submit"
+            >
+              {groupMutation.isPending ? 'Создаю...' : 'Создать комнату'}
+            </button>
+            {groupMutation.error && (
+              <p className="text-xs text-[var(--danger)]">{errorMessage(groupMutation.error)}</p>
+            )}
 
-        <button
-          className={`${brandPrimaryButtonCompactClassName} w-full`}
-          disabled={groupMutation.isPending}
-        >
-          {groupMutation.isPending ? 'Создаю...' : 'Создать комнату'}
-        </button>
-
-        {groupMutation.error && (
-          <p className="mt-2 text-xs text-[var(--danger)]">{errorMessage(groupMutation.error)}</p>
+            {createdGroupId && (
+              <div className="grid gap-2 border-t brand-divider pt-3">
+                <p className="text-xs text-[var(--muted)]">
+                  Комната создана. Пригласи участников по одноразовой ссылке.
+                </p>
+                <button
+                  aria-label="Создать и скопировать invite-ссылку"
+                  className={brandSecondaryButtonCompactClassName}
+                  disabled={inviteMutation.isPending}
+                  onClick={() => inviteMutation.mutate(createdGroupId)}
+                  type="button"
+                >
+                  {inviteMutation.isPending ? 'Создаю ссылку...' : 'Создать invite-ссылку'}
+                </button>
+                {inviteLink && (
+                  <div className="flex min-w-0 items-center gap-2">
+                    <input
+                      aria-label="Invite-ссылка"
+                      className={`${brandInputCompactClassName} min-w-0 flex-1 text-xs`}
+                      readOnly
+                      value={inviteLink}
+                    />
+                    <button
+                      aria-label="Скопировать invite-ссылку"
+                      className={`${brandGhostButtonClassName} h-10 shrink-0 px-3 text-xs`}
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(inviteLink);
+                        setInviteStatus('Ссылка скопирована.');
+                      }}
+                      type="button"
+                    >
+                      Копировать
+                    </button>
+                  </div>
+                )}
+                {inviteStatus && (
+                  <p
+                    className={
+                      inviteStatus.includes('ош')
+                        ? 'text-xs text-[var(--danger)]'
+                        : 'text-xs text-[var(--success)]'
+                    }
+                  >
+                    {inviteStatus}
+                  </p>
+                )}
+              </div>
+            )}
+          </form>
         )}
-      </form>
+      </section>
 
-      <div className="app-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+      <div
+        aria-label="Список чатов"
+        className="app-scrollbar mt-3 min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pr-1"
+        onKeyDown={handleChatListKeyDown}
+        role="listbox"
+        tabIndex={-1}
+      >
         {actionError && <p className={`mb-3 ${brandDangerNoticeClassName}`}>{actionError}</p>}
         {chats.length === 0 && (
           <div className="brand-surface mt-6 grid place-items-center px-4 py-6 text-center">
@@ -994,8 +1268,12 @@ function ChatSidebar({
                   : 'border-[var(--border)] bg-[linear-gradient(180deg,rgba(24,26,30,0.98),rgba(15,16,19,0.98))] hover:border-[var(--border-strong)] hover:bg-[linear-gradient(180deg,rgba(28,30,35,1),rgba(18,19,22,1))]'
               }`}
               key={chat.id}
+              role="option"
+              aria-selected={active}
             >
               <button
+                aria-label={`Открыть чат ${chat.displayTitle ?? chat.title ?? 'Чат'}`}
+                data-chat-index={chats.indexOf(chat)}
                 className="min-w-0 flex-1 rounded-xl px-2 py-1.5 text-left"
                 onClick={() => onSelect(chat.id)}
                 type="button"
@@ -1035,6 +1313,7 @@ function ChatSidebar({
       <div className="brand-surface mt-3 shrink-0 p-3">
         <p className="brand-eyebrow text-[10px] text-[var(--muted)]">Profile</p>
         <button
+          aria-label={`Открыть профиль @${currentUser.username ?? currentUser.name}`}
           className="brand-surface-muted mt-2 w-full px-3 py-3 text-left transition-colors duration-150 hover:border-[var(--border-strong)]"
           onClick={onOpenProfile}
           type="button"
@@ -1435,9 +1714,16 @@ function GroupSettingsModal({
               <section className="brand-surface grid gap-3 p-4">
                 <div>
                   <p className="text-sm font-medium text-[var(--text)]">Пригласить по ссылке</p>
-                  <p className="text-xs text-[var(--muted)]">Ссылка добавит пользователя в эту комнату.</p>
+                  <p className="text-xs text-[var(--muted)]">
+                    Ссылка добавит пользователя в эту комнату.
+                  </p>
                 </div>
-                <button className={brandPrimaryButtonCompactClassName} disabled={linkMutation.isPending} onClick={() => linkMutation.mutate()} type="button">
+                <button
+                  className={brandPrimaryButtonCompactClassName}
+                  disabled={linkMutation.isPending}
+                  onClick={() => linkMutation.mutate()}
+                  type="button"
+                >
                   {linkMutation.isPending ? 'Создаю...' : 'Создать и скопировать ссылку'}
                 </button>
               </section>
@@ -1875,10 +2161,7 @@ function ChatView({
           <p className="mb-2 text-xs text-[var(--muted)]">{typingUsers.join(', ')} печатает...</p>
         )}
 
-        <form
-          className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2"
-          onSubmit={send}
-        >
+        <form className="grid grid-cols-[minmax(0,1fr)_auto] items-stretch gap-2" onSubmit={send}>
           <input
             className={`${brandInputCompactClassName} min-w-0`}
             maxLength={4000}
@@ -1916,12 +2199,19 @@ function ChatLayout() {
   const [roomPanelRequestChatId, setRoomPanelRequestChatId] = useState<string | null>(null);
   const [roomPanelRequestVersion, setRoomPanelRequestVersion] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    readStoredBoolean(SIDEBAR_RAIL_STORAGE_KEY, false),
+  );
   const [socketGeneration, setSocketGeneration] = useState(0);
   const [localUsername, setLocalUsername] = useState<string | null>(baseUser?.username ?? null);
   const selectedChatIdRef = useRef<string | null>(null);
   const currentUserIdRef = useRef<string | null>(baseUser?.id ?? null);
   const chatsQuery = useQuery({ queryKey: ['chats'], queryFn: api.listChats });
   const chats = chatsQuery.data?.chats ?? [];
+
+  useEffect(() => {
+    writeStoredBoolean(SIDEBAR_RAIL_STORAGE_KEY, sidebarCollapsed);
+  }, [sidebarCollapsed]);
   const selectedChat = useMemo(
     () => chats.find((chat) => chat.id === selectedChatId) ?? null,
     [chats, selectedChatId],
@@ -2377,9 +2667,12 @@ function ChatLayout() {
 
   return (
     <>
-      <main className="grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] md:grid-cols-[352px_1fr]">
+      <main
+        className={`grid h-dvh min-h-0 grid-cols-1 overflow-hidden bg-[linear-gradient(180deg,rgba(8,9,11,1),rgba(5,5,7,1))] ${sidebarCollapsed ? 'md:grid-cols-[84px_1fr]' : 'md:grid-cols-[352px_1fr]'}`}
+      >
         <div className="hidden min-h-0 overflow-hidden md:block">
           <ChatSidebar
+            collapsed={sidebarCollapsed}
             chats={chats}
             currentUser={currentUser}
             onOpenGroupManager={handleOpenGroupManager}
@@ -2388,6 +2681,7 @@ function ChatLayout() {
             onSignOut={signOut}
             selectedChatId={selectedChatId}
             socket={socket}
+            onToggleCollapsed={() => setSidebarCollapsed((value) => !value)}
           />
         </div>
 
@@ -2404,6 +2698,7 @@ function ChatLayout() {
           />
           <div className="absolute inset-y-0 left-0 h-full w-[min(88vw,352px)] overflow-hidden">
             <ChatSidebar
+              collapsed={false}
               chats={chats}
               currentUser={currentUser}
               onOpenGroupManager={handleOpenGroupManager}
@@ -2412,6 +2707,7 @@ function ChatLayout() {
               onSignOut={signOut}
               selectedChatId={selectedChatId}
               socket={socket}
+              onToggleCollapsed={() => undefined}
             />
           </div>
         </div>
@@ -2483,8 +2779,33 @@ function InvitePage() {
   const navigate = useNavigate();
   const mutation = useMutation({
     mutationFn: () => api.joinInvite(token),
-    onSuccess: ({ chatId }) => navigate(`/app?chat=${encodeURIComponent(chatId)}`, { replace: true }),
+    onSuccess: ({ chatId }) =>
+      navigate(`/app?chat=${encodeURIComponent(chatId)}`, { replace: true }),
   });
-  useEffect(() => { if (token) mutation.mutate(); }, [token]);
-  return <main className="flex min-h-screen items-center justify-center p-6"><section className="brand-modal grid max-w-md gap-4 p-6 text-center"><h1 className="brand-display text-xl">Приглашение в комнату</h1><p className="text-sm text-[var(--muted)]">{mutation.isPending ? 'Подключаем...' : mutation.isError ? errorMessage(mutation.error) : 'Готово'}</p>{mutation.isError && <button className={brandPrimaryButtonCompactClassName} onClick={() => navigate('/app')} type="button">Вернуться в приложение</button>}</section></main>;
+  useEffect(() => {
+    if (token) mutation.mutate();
+  }, [token]);
+  return (
+    <main className="flex min-h-screen items-center justify-center p-6">
+      <section className="brand-modal grid max-w-md gap-4 p-6 text-center">
+        <h1 className="brand-display text-xl">Приглашение в комнату</h1>
+        <p className="text-sm text-[var(--muted)]">
+          {mutation.isPending
+            ? 'Подключаем...'
+            : mutation.isError
+              ? errorMessage(mutation.error)
+              : 'Готово'}
+        </p>
+        {mutation.isError && (
+          <button
+            className={brandPrimaryButtonCompactClassName}
+            onClick={() => navigate('/app')}
+            type="button"
+          >
+            Вернуться в приложение
+          </button>
+        )}
+      </section>
+    </main>
+  );
 }
