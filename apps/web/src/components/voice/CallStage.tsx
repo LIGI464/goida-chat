@@ -20,6 +20,7 @@ import type { Chat, PublicUser } from '../../lib/api';
 import { AudioSettingsDrawer } from './AudioSettingsDrawer';
 import { CallControls } from './CallControls';
 import { ParticipantTile } from './ParticipantTile';
+import { ScreenShareTile } from './ScreenShareTile';
 
 function resolveParticipantUserId(participant: { identity: string; metadata?: string }) {
   if (participant.metadata) {
@@ -93,6 +94,7 @@ export function CallStage({
   const participants = useParticipants();
   const remoteParticipants = useRemoteParticipants();
   const trackRefs = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }]);
+  const screenTrackRefs = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }]);
   const { microphoneTrack } = useLocalParticipant();
   const meterTrack = microphoneTrack?.audioTrack?.mediaStreamTrack;
   const meter = useAudioLevelMeter(meterTrack, noiseSuppressionMode);
@@ -108,16 +110,19 @@ export function CallStage({
 
   const hasCamera = participants.some((participant) => participant.isCameraEnabled);
   const participantCount = participants.length;
+  const tileCount = participantCount + screenTrackRefs.length;
   const stageViewportClass =
-    participantCount === 1
-      ? 'min-h-[220px] max-h-[min(34vh,320px)] md:min-h-[240px] md:max-h-[min(38vh,360px)]'
-      : hasCamera
-        ? 'min-h-[240px] max-h-[min(44vh,420px)]'
-        : 'min-h-[220px] max-h-[min(38vh,360px)]';
+    screenTrackRefs.length > 0
+      ? 'min-h-[240px] max-h-[min(52vh,520px)]'
+      : participantCount === 1
+        ? 'min-h-[220px] max-h-[min(34vh,320px)] md:min-h-[240px] md:max-h-[min(38vh,360px)]'
+        : hasCamera
+          ? 'min-h-[240px] max-h-[min(44vh,420px)]'
+          : 'min-h-[220px] max-h-[min(38vh,360px)]';
   const participantGridClass =
-    participantCount === 1
+    tileCount === 1
       ? 'mx-auto max-w-[420px] grid-cols-1'
-      : participantCount === 2
+      : tileCount === 2
         ? 'mx-auto max-w-5xl grid-cols-1 md:grid-cols-2'
         : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-3';
 
@@ -174,6 +179,23 @@ export function CallStage({
             className={`voice-stage-scroll min-w-0 overflow-y-auto overflow-x-hidden pr-1 ${stageViewportClass}`}
           >
             <div className={`grid auto-rows-fr gap-3 ${participantGridClass}`}>
+              {screenTrackRefs.map((trackRef) => {
+                const participant = trackRef.participant;
+                const remoteUserId = resolveParticipantUserId(participant);
+                const user = userMap.get(remoteUserId);
+                const displayName = `@${
+                  user?.username ?? participant.name ?? user?.name ?? remoteUserId
+                }`;
+
+                return (
+                  <ScreenShareTile
+                    displayName={displayName}
+                    key={`screen-${trackRef.publication?.trackSid ?? participant.identity}`}
+                    participant={participant}
+                    trackRef={trackRef}
+                  />
+                );
+              })}
               {participants.map((participant) => {
                 const trackRef = trackRefs.find(
                   (candidate) => candidate.participant.identity === participant.identity,
